@@ -168,6 +168,11 @@ p {
   outline: none;
 }
 
+.nav-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .nav-tab:hover {
   color: var(--text);
 }
@@ -201,6 +206,11 @@ p {
   background-color: var(--bg-card);
   color: var(--accent);
   border-color: var(--accent);
+}
+
+.icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .main-content {
@@ -278,6 +288,11 @@ p {
   border: none;
   outline: none;
   text-decoration: none;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .btn:active {

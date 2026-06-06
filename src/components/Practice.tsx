@@ -28,6 +28,7 @@ export const Practice: React.FC<PracticeProps> = ({ onNavigate, practiceWords })
   const engineRef = useRef<TypingEngine | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const tabPressedRef = useRef<boolean>(false);
+  const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Initialize engineRef on mount or if null
   if (engineRef.current === null) {
@@ -72,6 +73,12 @@ export const Practice: React.FC<PracticeProps> = ({ onNavigate, practiceWords })
   }, [practiceWords]);
 
   const handleRestart = () => {
+    // Cancel any pending auto-redirect
+    if (redirectTimerRef.current) {
+      clearTimeout(redirectTimerRef.current);
+      redirectTimerRef.current = null;
+    }
+
     const listWords = practiceWords && practiceWords.length > 0 ? practiceWords : FALLBACK_WORDS;
     engineRef.current = new TypingEngine(listWords);
 
@@ -91,6 +98,15 @@ export const Practice: React.FC<PracticeProps> = ({ onNavigate, practiceWords })
       }
     }, 50);
   };
+
+  // Cleanup redirect timer on unmount
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current) {
+        clearTimeout(redirectTimerRef.current);
+      }
+    };
+  }, []);
 
   // Keyboard shortcut listener for global Tab+Enter restart and Esc pause
   useEffect(() => {
@@ -136,6 +152,10 @@ export const Practice: React.FC<PracticeProps> = ({ onNavigate, practiceWords })
       if (engine.endTime === null) {
         engine.endTime = Date.now();
       }
+      // Auto-redirect to Progress after 2 seconds so user briefly sees their completion stats
+      redirectTimerRef.current = setTimeout(() => {
+        onNavigate('progress');
+      }, 2000);
     }
   };
 
