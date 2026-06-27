@@ -14,11 +14,8 @@ import {
 } from '../services/db';
 import { computeKeyAccuracyHeatmap, getBestWpmPerDuration } from '../services/analytics';
 
-const LESSONS_LIST = [
-  { id: 1, title: "Lesson 1: Home Row Basics", description: "Master home row position keys: A S D F and J K L ;" },
-  { id: 2, title: "Lesson 2: Index Extensions", description: "Reinforce index extensions: G, H, R, U, T, Y, V, B, N, M" },
-  { id: 3, title: "Lesson 3: Ring & Pinky", description: "Stretch outer fingers to hit: Q, W, O, P, Z, X, C, comma, period" }
-];
+// Import the full curriculum lesson metadata structure from the utilities module
+import { lessons as LESSONS_LIST } from '../utils/lessonsData';
 
 export const ProgressView = () => {
   const [sessions, setSessions] = useState<TypingTestSession[]>([]);

@@ -111,6 +111,14 @@ export async function getLessonHistory(): Promise<LessonAttempt[]> {
 }
 
 /**
+ * Fetches all attempts for a specific lesson.
+ * Useful for checking historic scores and attempts for a specific lesson stage.
+ */
+export async function getLessonAttempts(lessonId: number): Promise<LessonAttempt[]> {
+  return db.lessons.where('lessonId').equals(lessonId).toArray();
+}
+
+/**
  * Counts the number of unique lessons completed.
  */
 export async function getCompletedLessonsCount(): Promise<number> {
