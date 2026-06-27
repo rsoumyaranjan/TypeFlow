@@ -4,21 +4,34 @@
 
 **Live URL**: _(Cloudflare Pages — to be published after QA approval)_  
 **GitHub**: [rsoumyaranjan/TypeFlow](https://github.com/rsoumyaranjan/TypeFlow)  
-**Current Version**: V1.0 (test branch — pending QA review)
+**Current Version**: V2.0 (test branch — pending QA review)
 
 ---
 
-## Pages
+## Pages & Routes
 
-| Page | URL | Description |
+| Page | Route | Description |
 |---|---|---|
 | Dashboard | `/` | Onboarding guide, personal bests, weak-key recommendations |
 | Typing Test | `/test` | Timed 15s / 30s / 60s typing test with live WPM feedback |
 | Results | `/results` | WPM, Raw WPM, Accuracy, Errors, and next drill recommendation |
 | Practice | `/practice` | Drill mode targeting words from your last session errors |
-| Learn | `/learn` | Interactive touch-typing lessons with virtual keyboard guide |
-| Progress | `/progress` | Session history, personal bests, key accuracy heatmap, lessons checklist |
+| Curriculum Grid | `/curriculum` | The standalone entry screen containing the grid of 500 touch-typing chapters |
+| Stage Practice | `/stage/:id` | Isolated Focus Mode training screen with paginated, 10-character box displays |
+| Progress | `/progress` | Session history, key accuracy heatmap, and circular curriculum completion metrics |
 | About | `/about` | Privacy posture, calculation formulas, and local data controls |
+
+---
+
+## Technical Enhancements (V2.0 Update)
+
+- **Curriculum Architecture:** A 500-stage curriculum generator (`lessonsData.ts`) structured around progressive finger exercises, spaces, and cumulative reviews.
+- **Standalone Focus Mode UI:** Active stage paths (`/stage/:id`) automatically hide header logos, nav tabs, theme togglers, and persistent footers to maximize user focus.
+- **Sliding Viewport Console:** Text inputs are chunked so only 10 character boxes are rendered at a time, keeping training sleek and centered.
+- **Complete Hotkeys:** Pressing `Enter` automatically advances to the next stage upon graduation, or repeats the current lesson on failure.
+- **OTP Account Authentication:** Integrated signup profile module with gender avatars, verification modals, and a right-aligned action menu.
+- **Live settings auto-save:** WPM/Accuracy target settings sliders are fully interactive and update immediately.
+- **Circular Category Gauges:** Swapped the progress page checklists with graphical SVGs representing completion percentage per curriculum category.
 
 ---
 
@@ -92,7 +105,7 @@ The `public/_redirects` file is already configured:
 ```
 /* /index.html 200
 ```
-This ensures page refreshes on any route (`/test`, `/learn`, `/progress`) do not return 404 errors.
+This ensures page refreshes on any route do not return 404 errors.
 
 ---
 
@@ -114,7 +127,8 @@ src/
 │   ├── TypingTest.tsx # Typing engine UI
 │   ├── Results.tsx    # Post-test metrics
 │   ├── Practice.tsx   # Drill mode
-│   ├── Learn.tsx      # Touch-typing lessons
+│   ├── Curriculum.tsx # Curriculum grid page
+│   ├── Learn.tsx      # Standalone stage editor
 │   ├── ProgressView.tsx # Stats, history, data controls
 │   └── About.tsx      # Privacy + help
 ├── services/
@@ -124,7 +138,7 @@ src/
 │   └── typingEngine.ts # WPM/accuracy calculation engine
 ├── App.tsx            # Router + global layout + themes
 ├── index.css          # Design system + CSS variables
-└── main.tsx           # Entry point + BrowserRouter
+├── main.tsx           # Entry point + BrowserRouter
 specs/                 # Product/technical specifications
 public/
 └── _redirects         # Cloudflare Pages SPA routing rule
@@ -146,5 +160,6 @@ Test Files: 3 passed | Tests: 26 passed
 
 ## Roadmap
 
-- **V1** — Core typing test, local persistence, learn page, progress tracking *(current)*
-- **V2** — User accounts, cloud sync, advanced analytics, multiplayer features
+- **V1** — Core typing test, local persistence, learn page, progress tracking
+- **V2** — Standalone 500-stage curriculum, sliding viewports, profiles, target settings *(current)*
+- **V3** — Cloud syncing database backup and multiplayer features

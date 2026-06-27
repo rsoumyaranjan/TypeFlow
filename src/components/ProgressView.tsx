@@ -32,10 +32,15 @@ export const ProgressView = () => {
     ['z', 'x', 'c', 'v', 'b', 'n', 'm']
   ];
 
+  const [userStats, setUserStats] = useState<any>(null);
+
   // Fetch data on mount
   const loadData = async () => {
     try {
       setLoading(true);
+      const { db } = await import('../services/db');
+      const stats = await db.userStats.get('current_user');
+      setUserStats(stats);
       const history = await getTestHistory();
       const pbList = await getPersonalBests();
       const lessonHistory = await getLessonHistory();
@@ -176,9 +181,21 @@ export const ProgressView = () => {
       />
 
       {/* Page Header */}
-      <div className="flex" style={{ alignItems: 'center', gap: '0.5rem' }}>
-        <BarChart2 size={24} style={{ color: 'var(--accent)' }} />
-        <h2>Progress &amp; Analytics</h2>
+      <div className="flex" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="flex" style={{ alignItems: 'center', gap: '0.5rem' }}>
+          <BarChart2 size={24} style={{ color: 'var(--accent)' }} />
+          <h2>Progress &amp; Analytics</h2>
+        </div>
+        {userStats && (
+          <div style={{ display: 'flex', gap: '1rem', fontSize: '0.85rem' }}>
+            <span className="card" style={{ padding: '0.35rem 0.75rem', borderColor: 'var(--border)' }}>
+              🏆 Level <strong>{userStats.level}</strong> ({userStats.xp} XP)
+            </span>
+            <span className="card" style={{ padding: '0.35rem 0.75rem', borderColor: 'var(--border)', color: 'var(--warning)' }}>
+              🔥 <strong>{userStats.currentStreak}</strong> Day Streak
+            </span>
+          </div>
+        )}
       </div>
 
       {/* High Scores Banner */}

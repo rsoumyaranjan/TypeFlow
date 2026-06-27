@@ -195,6 +195,17 @@ export const Learn: React.FC<LearnProps> = ({ stageIndex, onBackToCurriculum, on
             durationSeconds
           });
           loadHistory();
+          
+          // If graduated, reward XP and update daily streak
+          if (isGraduated) {
+            const { calculateXPEarned, addXP, updateDailyStreak } = await import('../services/db');
+            const xp = calculateXPEarned(finalWpm, finalAccuracy, durationSeconds);
+            const { levelUp, newLevel } = await addXP(xp);
+            await updateDailyStreak();
+            if (levelUp) {
+              alert(`🎉 Level Up! You reached Level ${newLevel}!`);
+            }
+          }
         } catch (err) {
           console.error('Failed to save lesson attempt:', err);
         }

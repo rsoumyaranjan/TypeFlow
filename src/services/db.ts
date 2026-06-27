@@ -29,10 +29,22 @@ export interface LessonAttempt {
   durationSeconds: number;
 }
 
+export interface UserStats {
+  id: string; // e.g. "current_user"
+  xp: number;
+  level: number;
+  currentStreak: number;
+  longestStreak: number;
+  lastActiveTimestamp: number;
+  unlockedThemes: string[];
+  activeTheme: string;
+}
+
 export class TypeFlowDB extends Dexie {
   tests!: Table<TypingTestSession, number>;
   personalBests!: Table<PersonalBest, number>;
   lessons!: Table<LessonAttempt, number>;
+  userStats!: Table<UserStats, string>;
 
   constructor() {
     super('TypeFlowDB');
@@ -48,6 +60,14 @@ export class TypeFlowDB extends Dexie {
       tests: '++id, timestamp, duration, wpm, accuracy',
       personalBests: 'duration, wpm, timestamp',
       lessons: '++id, lessonId, completedAt'
+    });
+
+    // Version 3 (Adding Gamification & Streaks)
+    this.version(3).stores({
+      tests: '++id, timestamp, duration, wpm, accuracy',
+      personalBests: 'duration, wpm, timestamp',
+      lessons: '++id, lessonId, completedAt',
+      userStats: 'id'
     });
   }
 }
@@ -325,3 +345,102 @@ async function rebuildPersonalBestsFromTests(): Promise<void> {
     await db.personalBests.bulkPut(newBests);
   }
 }
+
+/**
+ * Calculates experience points (XP) based on typing performance metrics.
+ */
+export function calculateXPEarned(wpm: number, accuracy: number, durationSeconds: number): number {
+  const accuracyMultiplier = Math.pow(accuracy / 100, 2);
+  const timeFactor = durationSeconds / 10;
+  return Math.round(wpm * accuracyMultiplier * timeFactor);
+}
+
+/**
+ * Adds XP to the user's statistics, level up check is performed dynamically.
+ */
+export async function addXP(amount: number): Promise<{ levelUp: boolean; newLevel: number; totalXp: number }> {
+  return db.transaction('rw', db.userStats, async () => {
+    let stats = await db.userStats.get('current_user');
+    if (!stats) {
+      stats = {
+        id: 'current_user',
+        xp: 0,
+        level: 1,
+        currentStreak: 0,
+        longestStreak: 0,
+        lastActiveTimestamp: 0,
+        unlockedThemes: ['theme-dark', 'theme-light', 'theme-sepia'],
+        activeTheme: 'theme-dark'
+      };
+    }
+    
+    stats.xp += amount;
+    
+    // Level Up Threshold: Level = Math.floor(Math.sqrt(XP / 100)) + 1
+    const calculatedLevel = Math.floor(Math.sqrt(stats.xp / 100)) + 1;
+    const levelUp = calculatedLevel > stats.level;
+    
+    if (levelUp) {
+      stats.level = calculatedLevel;
+    }
+    
+    await db.userStats.put(stats);
+    return { levelUp, newLevel: stats.level, totalXp: stats.xp };
+  });
+}
+
+/**
+ * Handles daily active streaks checks on completions.
+ */
+export async function updateDailyStreak(): Promise<{ currentStreak: number; streakUpdated: boolean }> {
+  return db.transaction('rw', db.userStats, async () => {
+    let stats = await db.userStats.get('current_user');
+    const now = new Date();
+    
+    // Normalize date to midnight for comparison
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    
+    if (!stats) {
+      stats = {
+        id: 'current_user',
+        xp: 0,
+        level: 1,
+        currentStreak: 1,
+        longestStreak: 1,
+        lastActiveTimestamp: today,
+        unlockedThemes: ['theme-dark', 'theme-light', 'theme-sepia'],
+        activeTheme: 'theme-dark'
+      };
+      await db.userStats.put(stats);
+      return { currentStreak: 1, streakUpdated: true };
+    }
+
+    const lastActiveDate = new Date(stats.lastActiveTimestamp);
+    const lastActiveMidnight = new Date(lastActiveDate.getFullYear(), lastActiveDate.getMonth(), lastActiveDate.getDate()).getTime();
+    
+    const diffMs = today - lastActiveMidnight;
+    let newStreak = stats.currentStreak;
+    let updated = false;
+
+    if (diffMs === oneDayMs) {
+      // Consecutive day active
+      newStreak += 1;
+      updated = true;
+    } else if (diffMs > oneDayMs) {
+      // Streak broken, reset to 1
+      newStreak = 1;
+      updated = true;
+    }
+
+    if (updated || stats.lastActiveTimestamp !== today) {
+      stats.currentStreak = newStreak;
+      stats.longestStreak = Math.max(stats.longestStreak, newStreak);
+      stats.lastActiveTimestamp = today;
+      await db.userStats.put(stats);
+    }
+
+    return { currentStreak: stats.currentStreak, streakUpdated: updated };
+  });
+}
+

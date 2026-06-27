@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { Keyboard, Volume2, VolumeX, Moon, Sun, Palette } from 'lucide-react';
+import { Keyboard, Moon, Sun, Palette } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { TypingTest } from './components/TypingTest';
 import { Results } from './components/Results';
@@ -10,6 +10,8 @@ import { About } from './components/About';
 import { Learn } from './components/Learn';
 import { Auth } from './components/Auth';
 import { Curriculum } from './components/Curriculum';
+import { Login } from './components/Login';
+import { SettingsMenu } from './components/SettingsMenu';
 import './App.css';
 import type { TypingTestSession } from './services/db';
 
@@ -222,15 +224,8 @@ function App() {
             {/* Optional User Nickname Auth Profile */}
             <Auth />
 
-            {/* Sound Toggle */}
-            <button 
-              className="icon-btn" 
-              onClick={() => setSoundOn(!soundOn)}
-              title={soundOn ? "Mute sounds" : "Enable sounds"}
-              aria-label={soundOn ? "Mute sounds" : "Enable sounds"}
-            >
-              {soundOn ? <Volume2 size={18} /> : <VolumeX size={18} />}
-            </button>
+            {/* Settings & Layout Menu */}
+            <SettingsMenu soundOn={soundOn} setSoundOn={setSoundOn} />
 
             {/* Theme Toggle */}
             <button 
@@ -246,7 +241,7 @@ function App() {
       )}
 
       {/* Main View Container */}
-      <main className="main-content" style={{ paddingTop: isStagePage ? '2rem' : '6rem' }}>
+      <main className="main-content" style={{ paddingTop: isStagePage ? '1rem' : '2rem' }}>
         <Routes>
           <Route path="/" element={
             <Dashboard 
@@ -293,6 +288,7 @@ function App() {
           } />
           <Route path="/progress" element={<ProgressView />} />
           <Route path="/about" element={<About />} />
+          <Route path="/login" element={<Login />} />
           <Route path="*" element={
             <Dashboard 
               onNavigate={handleNavigate} 
