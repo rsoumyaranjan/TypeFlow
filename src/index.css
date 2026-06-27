@@ -105,9 +105,9 @@ p {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.5rem 0;
+  padding: 0.75rem 0;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 2.5rem;
+  margin-bottom: 1rem;
 }
 
 .logo-container {
@@ -548,4 +548,100 @@ p {
 .kb-key {
   transition: transform 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.275), background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
+
+/* User Avatar Styling */
+.user-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  background-color: var(--bg-hover);
+  user-select: none;
+}
+
+/* Bounded circle container styling inside non-dark themes */
+.theme-light .user-avatar,
+.theme-sepia .user-avatar {
+  border: 2px solid var(--border);
+  background-color: var(--bg-card);
+}
+.theme-light .user-avatar:hover,
+.theme-sepia .user-avatar:hover {
+  border-color: var(--accent);
+  background-color: var(--bg-hover);
+}
+
+/* Glowing hover styling effects in dark themes */
+.theme-dark .user-avatar {
+  border: 2px solid transparent;
+  background-color: var(--bg-card);
+  box-shadow: 0 0 4px rgba(14, 165, 233, 0.2);
+}
+.theme-dark .user-avatar:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+  transform: scale(1.05);
+}
+
+/* Minimal User Icon before logging in */
+.user-avatar-minimal {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background-color: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.user-avatar-minimal:hover {
+  background-color: var(--bg-card);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Social authentication spinner */
+.social-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  borderRadius: 50%;
+  animation: spin 1s linear infinite;
+}
+/* Keystroke Pop Animation for correctly hit letters */
+@keyframes pop {
+  0% {
+    transform: scale(0.9);
+    filter: brightness(1.2);
+  }
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 0 15px var(--success);
+  }
+  100% {
+    transform: scale(1.05);
+  }
+}
+
+/* Shake keyframes animation for incorrect letters */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 

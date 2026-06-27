@@ -130,6 +130,15 @@ export const TypingTest: React.FC<TypingTestProps> = ({ onTestComplete }) => {
 
     try {
       await saveTestSession(sessionData);
+      
+      // Reward XP + Update Streak on completion
+      const { calculateXPEarned, addXP, updateDailyStreak } = await import('../services/db');
+      const xp = calculateXPEarned(sessionData.wpm, sessionData.accuracy, duration);
+      const { levelUp, newLevel } = await addXP(xp);
+      await updateDailyStreak();
+      if (levelUp) {
+        alert(`🎉 Level Up! You reached Level ${newLevel}!`);
+      }
     } catch (err) {
       console.error('Failed to save session:', err);
     }

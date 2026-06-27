@@ -30,11 +30,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onStartPractic
   const [touchTypeStatus, setTouchTypeStatus] = useState<'yes' | 'no' | 'unsure' | null>(null);
   const [onboardingAnswered, setOnboardingAnswered] = useState<boolean>(false);
 
+  const [userStats, setUserStats] = useState<any>(null);
+
   // Load database statistics on mount
   useEffect(() => {
     const loadDashboardData = async () => {
       try {
         setLoading(true);
+        const { db } = await import('../services/db');
+        const stats = await db.userStats.get('current_user');
+        setUserStats(stats);
         const history = await getTestHistory();
         const pbList = await getPersonalBests();
         setSessions(history);
@@ -221,11 +226,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onStartPractic
         <div className="card" style={{ padding: '1.25rem' }}>
           <h3 className="card-title" style={{ fontSize: '1.1rem', margin: '0 0 0.25rem 0' }}>
             <Trophy size={18} className="logo-icon" style={{ color: '#eab308' }} />
-            Personal Bests
+            Personal Bests &amp; Level
           </h3>
-          <p className="card-desc" style={{ fontSize: '0.85rem', margin: '0 0 1rem 0' }}>Your local record scores.</p>
+          <p className="card-desc" style={{ fontSize: '0.85rem', margin: '0 0 1rem 0' }}>Your achievements and typing streak.</p>
           
           <div className="flex-col gap-3">
+            {/* XP and level stats */}
+            <div className="flex" style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
+              <span style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>Typing Level</span>
+              <strong style={{ fontSize: '1.1rem', color: 'var(--accent)' }}>
+                Level {userStats?.level || 1} ({userStats?.xp || 0} XP)
+              </strong>
+            </div>
+
+            {/* Streak metrics */}
+            <div className="flex" style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
+              <span style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>Daily Streak 🔥</span>
+              <strong style={{ fontSize: '1.1rem', color: 'var(--warning)' }}>
+                {userStats?.currentStreak || 0} days (Best: {userStats?.longestStreak || 0})
+              </strong>
+            </div>
+
             <div className="flex" style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
               <span style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>Peak Speed</span>
               <strong style={{ fontSize: '1.1rem', color: 'var(--text)' }}>
