@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, CheckCircle, RotateCcw, ArrowRight, Keyboard, XCircle, Award } from 'lucide-react';
+import { RotateCcw, ArrowRight, Keyboard, XCircle, Award } from 'lucide-react';
 import { saveLessonAttempt, getLessonHistory } from '../services/db';
 import { lessons } from '../utils/lessonsData';
 
 interface LearnProps {
+  stageIndex: number;
+  onBackToCurriculum: () => void;
   onNavigate: (page: 'dashboard' | 'test' | 'results' | 'practice' | 'progress' | 'about') => void;
   onStartPractice?: (words: string[]) => void;
 }
@@ -89,19 +91,21 @@ const getFingerInfo = (char: string | undefined): { hand: 'left' | 'right'; fing
   return { hand: 'right', finger: 'pinky', color: '#fbcfe8', name: 'Right Pinky' };
 };
 
-export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
-  const [activeLessonIdx, setActiveLessonIdx] = useState<number>(0);
+export const Learn: React.FC<LearnProps> = ({ stageIndex, onBackToCurriculum, onNavigate }) => {
+  const [activeLessonIdx, setActiveLessonIdx] = useState<number>(stageIndex);
   const [charPointer, setCharPointer] = useState<number>(0);
   const [hasError, setHasError] = useState<boolean>(false);
   const [pressedKey, setPressedKey] = useState<string | null>(null);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [errorsCount, setErrorsCount] = useState<number>(0);
   
-  // Phase Filtering State
-  const [activePhase, setActivePhase] = useState<typeof PHASES[number]['code']>('home-row');
-  
+  // Sync prop changes
+  useEffect(() => {
+    setActiveLessonIdx(stageIndex);
+  }, [stageIndex]);
+
   // History tracking for checks
-  const [completedLessonIds, setCompletedLessonIds] = useState<Set<number>>(new Set());
+  const [, setCompletedLessonIds] = useState<Set<number>>(new Set());
 
   // Graduation results
   const [finalStats, setFinalStats] = useState<{
@@ -110,6 +114,9 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
     graduated: boolean;
     duration: number;
   } | null>(null);
+
+  const [failedAttempts, setFailedAttempts] = useState<number>(0);
+  const isDefaultTarget = !localStorage.getItem('typeflow_custom_target_wpm') && !localStorage.getItem('typeflow_custom_target_acc');
 
   const activeLesson = lessons[activeLessonIdx];
   const targetText = activeLesson.target;
@@ -140,7 +147,16 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
       // Calculate Stats
       const finalWpm = Math.round((targetText.length / 5) / (durationSeconds / 60));
       const finalAccuracy = Math.round((targetText.length / (targetText.length + errorsCount)) * 100);
-      const isGraduated = finalAccuracy >= 98 && finalWpm >= 25;
+      
+      const targetWpm = parseInt(localStorage.getItem('typeflow_custom_target_wpm') || '25');
+      const targetAcc = parseInt(localStorage.getItem('typeflow_custom_target_acc') || '98');
+      const isGraduated = finalAccuracy >= targetAcc && finalWpm >= targetWpm;
+
+      if (!isGraduated) {
+        setFailedAttempts(prev => prev + 1);
+      } else {
+        setFailedAttempts(0);
+      }
 
       setFinalStats({
         wpm: finalWpm,
@@ -181,7 +197,22 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (charPointerRef.current >= targetText.length) return;
+      // Handle Enter hotkey when stage completes
+      if (charPointerRef.current >= targetText.length) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          // Check finalStats graduation status
+          if (finalStats) {
+            if (finalStats.graduated) {
+              handleNextLesson();
+            } else {
+              handleRestart();
+            }
+          }
+        }
+        return;
+      }
+
       if (e.ctrlKey || e.altKey || e.metaKey) return;
 
       if (e.key === ' ') {
@@ -234,7 +265,7 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [targetText, hasError]);
+  }, [targetText, hasError, finalStats]);
 
   const handleRestart = () => {
     charPointerRef.current = 0;
@@ -250,7 +281,6 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
     if (activeLessonIdx < lessons.length - 1) {
       const nextIdx = activeLessonIdx + 1;
       setActiveLessonIdx(nextIdx);
-      setActivePhase(lessons[nextIdx].phase);
       charPointerRef.current = 0;
       setCharPointer(0);
       setHasError(false);
@@ -260,22 +290,6 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
       setFinalStats(null);
     }
   };
-
-  const handleSelectLesson = (idx: number) => {
-    // Check lock boundary
-    const isUnlocked = idx === 0 || completedLessonIds.has(lessons[idx - 1].id);
-    if (!isUnlocked) return;
-
-    setActiveLessonIdx(idx);
-    charPointerRef.current = 0;
-    setCharPointer(0);
-    setHasError(false);
-    setPressedKey(null);
-    setStartTime(null);
-    setErrorsCount(0);
-    setFinalStats(null);
-  };
-
   // Resolve custom keyboard styles based on finger map and interaction states
   const getKeyStyle = (char: string) => {
     const key = char.toLowerCase();
@@ -345,7 +359,6 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
   };
 
   const activeFinger = getFingerInfo(currentTargetChar);
-  const filteredLessons = lessons.map((l, i) => ({ ...l, index: i })).filter(l => l.phase === activePhase);
 
   return (
     <div className="flex-col gap-6" style={{ maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
@@ -402,20 +415,26 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
 
       {/* Page Title */}
       <div className="flex" style={{ alignItems: 'center', gap: '0.5rem', justifyContent: 'space-between' }}>
-        <div className="flex" style={{ alignItems: 'center', gap: '0.5rem' }}>
-          <BookOpen size={24} style={{ color: 'var(--accent)' }} />
-          <h2>Touch-Typing Academy ({activeLessonIdx + 1}/35)</h2>
+        <div className="flex" style={{ alignItems: 'center', gap: '0.75rem' }}>
+          <button 
+            className="btn btn-secondary" 
+            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }}
+            onClick={onBackToCurriculum}
+          >
+            &larr; Back to Curriculum
+          </button>
+          <h2>Touch-Typing Academy (Stage {activeLesson.id})</h2>
         </div>
         <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
           Phase: {PHASES.find(p => p.code === activeLesson.phase)?.label}
         </span>
       </div>
 
-      {/* Main Grid: Left is Tutor Screen, Right is Sidebar */}
-      <div className="grid grid-cols-12" style={{ gap: '1.5rem', alignItems: 'start' }}>
+      {/* Main Grid: Centered tutor card */}
+      <div className="flex-col" style={{ width: '100%', maxWidth: '850px', margin: '0 auto' }}>
         
-        {/* Left Side: interactive typing screen (8 columns) */}
-        <div className="col-span-8 flex-col gap-6">
+        {/* Left Side: interactive typing screen */}
+        <div className="flex-col gap-6" style={{ width: '100%' }}>
           {isCompleted && finalStats ? (
             /* SUCCESS COMPLETION PANEL */
             <div 
@@ -451,26 +470,31 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
                 <p style={{ color: 'var(--text-dim)', maxWidth: '520px', margin: '0 auto', fontSize: '0.95rem' }}>
                   {finalStats.graduated 
                     ? `Sensational! You cleared the QWERTY thresholds for Stage ${activeLesson.id}. You can now unlock the next stage.`
-                    : `You finished the typing buffer, but failed to meet graduation thresholds. You must achieve at least 25 WPM and 98% Accuracy.`}
+                    : `You finished the typing buffer, but failed to meet graduation thresholds. You must achieve at least ${localStorage.getItem('typeflow_custom_target_wpm') || '25'} WPM and ${localStorage.getItem('typeflow_custom_target_acc') || '98'}% Accuracy.`}
                 </p>
+                {!finalStats.graduated && failedAttempts >= 2 && isDefaultTarget && (
+                  <p style={{ color: 'var(--warning)', fontSize: '0.85rem', fontWeight: 600, marginTop: '0.5rem' }}>
+                    Tip: You can lower your target WPM &amp; accuracy settings in the Profile &gt; Settings panel.
+                  </p>
+                )}
               </div>
 
               {/* Metrics Displays */}
               <div className="flex gap-6" style={{ justifyContent: 'center', width: '100%', margin: '1rem 0' }}>
                 <div className="card flex-col flex-center" style={{ padding: '1rem', minWidth: '130px' }}>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Your Speed</span>
-                  <span style={{ fontSize: '1.75rem', fontWeight: 700, color: finalStats.wpm >= 25 ? 'var(--success)' : 'var(--danger)' }}>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 700, color: finalStats.wpm >= parseInt(localStorage.getItem('typeflow_custom_target_wpm') || '25') ? 'var(--success)' : 'var(--danger)' }}>
                     {finalStats.wpm} <span style={{ fontSize: '0.85rem' }}>WPM</span>
                   </span>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Target: &ge; 25 WPM</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Target: &ge; {localStorage.getItem('typeflow_custom_target_wpm') || '25'} WPM</span>
                 </div>
                 
                 <div className="card flex-col flex-center" style={{ padding: '1rem', minWidth: '130px' }}>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Your Accuracy</span>
-                  <span style={{ fontSize: '1.75rem', fontWeight: 700, color: finalStats.accuracy >= 98 ? 'var(--success)' : 'var(--danger)' }}>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 700, color: finalStats.accuracy >= parseInt(localStorage.getItem('typeflow_custom_target_acc') || '98') ? 'var(--success)' : 'var(--danger)' }}>
                     {finalStats.accuracy}%
                   </span>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Target: &ge; 98%</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Target: &ge; {localStorage.getItem('typeflow_custom_target_acc') || '98'}%</span>
                 </div>
 
                 <div className="card flex-col flex-center" style={{ padding: '1rem', minWidth: '130px' }}>
@@ -524,19 +548,33 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
                   )}
                 </div>
                 
-                  {/* Typing buffer screen rendered as individual box grid (EdClub style) */}
-                  <div 
-                    style={{
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      gap: '0.4rem',
-                      marginTop: '0.5rem',
-                      padding: '0.25rem'
-                    }}
-                  >
-                    {targetText.split('').map((char, index) => {
-                      const isCorrect = index < charPointer;
-                      const isActive = index === charPointer;
+                {/* Typing buffer screen rendered as individual box grid (EdClub style, paginated view of 10 characters) */}
+                <div 
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '0.4rem',
+                    marginTop: '0.5rem',
+                    padding: '0.25rem',
+                    justifyContent: 'center'
+                  }}
+                >
+                  {(() => {
+                    // Show a sliding viewport of 10 characters around the cursor
+                    const maxVisible = 10;
+                    const half = Math.floor(maxVisible / 2);
+                    let start = charPointer - half;
+                    if (start < 0) start = 0;
+                    let end = start + maxVisible;
+                    if (end > targetText.length) {
+                      end = targetText.length;
+                      start = Math.max(0, end - maxVisible);
+                    }
+
+                    return targetText.slice(start, end).split('').map((char, relativeIdx) => {
+                      const absoluteIdx = start + relativeIdx;
+                      const isCorrect = absoluteIdx < charPointer;
+                      const isActive = absoluteIdx === charPointer;
                       const isErrorActive = isActive && hasError;
 
                       let boxBg = 'var(--bg-card)';
@@ -565,291 +603,221 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
 
                       return (
                         <div
-                          key={index}
+                          key={absoluteIdx}
                           style={{
-                            width: '32px',
-                            height: '36px',
+                            width: '46px',
+                            height: '52px',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            borderRadius: '0.25rem',
+                            borderRadius: '0.35rem',
                             border: `1px solid ${boxBorder}`,
                             backgroundColor: boxBg,
                             color: boxColor,
                             fontFamily: 'var(--font-mono)',
-                            fontSize: '1.25rem',
+                            fontSize: '1.75rem',
                             fontWeight: 700,
                             transform: `scale(${boxScale})`,
                             transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
                             animation: animationName,
-                            boxShadow: isActive ? '0 0 8px var(--accent-glow)' : 'none'
+                            boxShadow: isActive ? '0 0 10px var(--accent-glow)' : 'none'
                           }}
                         >
                           {char === ' ' ? '\u2423' : char}
                         </div>
                       );
-                    })}
-                  </div>
+                    });
+                  })()}
+                </div>
               </div>
 
               {/* Virtual Hands and Keyboard Overlay */}
               <div className="grid grid-cols-12" style={{ gap: '1.5rem' }}>
-            
-            {/* Keyboard guide column (7 cols) */}
-            <div className="card flex-col flex-center col-span-8" style={{ gap: '0.75rem', padding: '1.5rem' }}>
-              <div className="flex-col gap-2" style={{ width: '100%' }}>
                 
-                {/* Keyboard rows */}
-                {keyboardRows.map((row, rIdx) => (
-                  <div key={rIdx} className="flex gap-1" style={{ justifyContent: 'center' }}>
-                    {row.map((char) => {
-                      const style = getKeyStyle(char);
-                      return (
-                        <div
-                          key={char}
-                          className="kb-key"
-                          style={{
-                            width: '40px',
-                            height: '40px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            borderRadius: '0.35rem',
-                            border: '1px solid',
-                            fontSize: '0.85rem',
-                            fontWeight: 700,
-                            textTransform: 'uppercase',
-                            transition: 'all 0.15s ease',
-                            ...style
-                          }}
-                        >
-                          {char}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
+                {/* Keyboard guide column (8 cols) */}
+                <div className="card flex-col flex-center col-span-8" style={{ gap: '0.75rem', padding: '1.5rem' }}>
+                  <div className="flex-col gap-2" style={{ width: '100%' }}>
+                    
+                    {/* Keyboard rows */}
+                    {keyboardRows.map((row, rIdx) => (
+                      <div key={rIdx} className="flex gap-1" style={{ justifyContent: 'center' }}>
+                        {row.map((char) => {
+                          const style = getKeyStyle(char);
+                          return (
+                            <div
+                              key={char}
+                              className="kb-key"
+                              style={{
+                                width: '40px',
+                                height: '40px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                borderRadius: '0.35rem',
+                                border: '1px solid',
+                                fontSize: '0.85rem',
+                                fontWeight: 700,
+                                textTransform: 'uppercase',
+                                transition: 'all 0.15s ease',
+                                ...style
+                              }}
+                            >
+                              {char}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
 
-                {/* Spacebar row */}
-                <div className="flex" style={{ justifyContent: 'center', marginTop: '0.25rem' }}>
-                  <div
-                    className="kb-key"
-                    style={{
-                      width: '240px',
-                      height: '38px',
-                      borderRadius: '0.35rem',
-                      border: '1px solid',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '0.75rem',
-                      textTransform: 'uppercase',
-                      fontWeight: 600,
-                      transition: 'all 0.15s ease',
-                      ...getSpacebarStyle()
-                    }}
-                  >
-                    Space
+                    {/* Spacebar row */}
+                    <div className="flex" style={{ justifyContent: 'center', marginTop: '0.25rem' }}>
+                      <div
+                        className="kb-key"
+                        style={{
+                          width: '240px',
+                          height: '38px',
+                          borderRadius: '0.35rem',
+                          border: '1px solid',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '0.75rem',
+                          textTransform: 'uppercase',
+                          fontWeight: 600,
+                          transition: 'all 0.15s ease',
+                          ...getSpacebarStyle()
+                        }}
+                      >
+                        Space
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Color Legend Finger Markers */}
+                  <div className="flex gap-3" style={{ marginTop: '1rem', justifyContent: 'center', fontSize: '0.7rem', flexWrap: 'wrap', opacity: 0.85 }}>
+                    <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#fda4af' }}></span> Pinkies
+                    </span>
+                    <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#fed7aa' }}></span> Rings
+                    </span>
+                    <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#fef08a' }}></span> Middles
+                    </span>
+                    <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#a7f3d0' }}></span> L Index
+                    </span>
+                    <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#99f6e4' }}></span> R Index
+                    </span>
+                    <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#bfdbfe' }}></span> R Middle
+                    </span>
+                    <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#e9d5ff' }}></span> R Ring
+                    </span>
+                    <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#fbcfe8' }}></span> R Pinky
+                    </span>
+                  </div>
+                </div>
+
+                {/* Hands & guidance column (4 cols) */}
+                <div className="card flex-col flex-center col-span-4" style={{ gap: '1rem', padding: '1.5rem', justifyContent: 'space-between' }}>
+                  <div style={{ textAlign: 'center', width: '100%' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Finger Guide
+                    </span>
+                    {activeFinger ? (
+                      <div style={{ marginTop: '0.5rem', fontWeight: 700, fontSize: '1.05rem', color: activeFinger.color, textShadow: `0 0 8px ${activeFinger.color}33` }}>
+                        {activeFinger.name}
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: '0.5rem', fontWeight: 600, color: 'var(--text-dim)' }}>
+                        Strike Key
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Hands SVG representation */}
+                  <svg className="hands-svg" width="180" height="110" viewBox="0 0 180 110" style={{ display: 'block', margin: '0 auto' }}>
+                    {/* Left hand boundary */}
+                    <path d="M10,85 C10,75 25,65 40,65 C55,65 70,75 70,85" stroke="var(--border)" fill="none" strokeWidth="1.5" />
+                    {/* Left Fingers */}
+                    {/* Pinky */}
+                    <circle cx="15" cy="45" r="5" 
+                      fill={activeFinger?.hand === 'left' && activeFinger?.finger === 'pinky' ? activeFinger.color : '#475569'} 
+                      className={activeFinger?.hand === 'left' && activeFinger?.finger === 'pinky' ? 'finger-pulse' : ''}
+                    />
+                    <line x1="15" y1="45" x2="20" y2="70" stroke="#475569" strokeWidth="1.5" />
+                    {/* Ring */}
+                    <circle cx="30" cy="30" r="5" 
+                      fill={activeFinger?.hand === 'left' && activeFinger?.finger === 'ring' ? activeFinger.color : '#475569'} 
+                      className={activeFinger?.hand === 'left' && activeFinger?.finger === 'ring' ? 'finger-pulse' : ''}
+                    />
+                    <line x1="30" y1="30" x2="32" y2="67" stroke="#475569" strokeWidth="1.5" />
+                    {/* Middle */}
+                    <circle cx="48" cy="22" r="5" 
+                      fill={activeFinger?.hand === 'left' && activeFinger?.finger === 'middle' ? activeFinger.color : '#475569'} 
+                      className={activeFinger?.hand === 'left' && activeFinger?.finger === 'middle' ? 'finger-pulse' : ''}
+                    />
+                    <line x1="48" y1="22" x2="46" y2="65" stroke="#475569" strokeWidth="1.5" />
+                    {/* Index */}
+                    <circle cx="65" cy="32" r="5" 
+                      fill={activeFinger?.hand === 'left' && activeFinger?.finger === 'index' ? activeFinger.color : '#475569'} 
+                      className={activeFinger?.hand === 'left' && activeFinger?.finger === 'index' ? 'finger-pulse' : ''}
+                    />
+                    <line x1="65" y1="32" x2="58" y2="67" stroke="#475569" strokeWidth="1.5" />
+                    {/* Thumb */}
+                    <circle cx="80" cy="55" r="5" 
+                      fill={activeFinger?.hand === 'left' && activeFinger?.finger === 'thumb' ? activeFinger.color : '#475569'} 
+                      className={activeFinger?.hand === 'left' && activeFinger?.finger === 'thumb' ? 'finger-pulse' : ''}
+                    />
+                    <line x1="80" y1="55" x2="68" y2="75" stroke="#475569" strokeWidth="1.5" />
+
+                    {/* Right hand boundary */}
+                    <path d="M170,85 C170,75 155,65 140,65 C125,65 110,75 110,85" stroke="var(--border)" fill="none" strokeWidth="1.5" />
+                    {/* Right Fingers */}
+                    {/* Thumb */}
+                    <circle cx="100" cy="55" r="5" 
+                      fill={activeFinger?.hand === 'right' && activeFinger?.finger === 'thumb' ? activeFinger.color : '#475569'} 
+                      className={activeFinger?.hand === 'right' && activeFinger?.finger === 'thumb' ? 'finger-pulse' : ''}
+                    />
+                    <line x1="100" y1="55" x2="112" y2="75" stroke="#475569" strokeWidth="1.5" />
+                    {/* Index */}
+                    <circle cx="115" cy="32" r="5" 
+                      fill={activeFinger?.hand === 'right' && activeFinger?.finger === 'index' ? activeFinger.color : '#475569'} 
+                      className={activeFinger?.hand === 'right' && activeFinger?.finger === 'index' ? 'finger-pulse' : ''}
+                    />
+                    <line x1="115" y1="32" x2="122" y2="67" stroke="#475569" strokeWidth="1.5" />
+                    {/* Middle */}
+                    <circle cx="132" cy="22" r="5" 
+                      fill={activeFinger?.hand === 'right' && activeFinger?.finger === 'middle' ? activeFinger.color : '#475569'} 
+                      className={activeFinger?.hand === 'right' && activeFinger?.finger === 'middle' ? 'finger-pulse' : ''}
+                    />
+                    <line x1="132" y1="22" x2="134" y2="65" stroke="#475569" strokeWidth="1.5" />
+                    {/* Ring */}
+                    <circle cx="150" cy="30" r="5" 
+                      fill={activeFinger?.hand === 'right' && activeFinger?.finger === 'ring' ? activeFinger.color : '#475569'} 
+                      className={activeFinger?.hand === 'right' && activeFinger?.finger === 'ring' ? 'finger-pulse' : ''}
+                    />
+                    <line x1="150" y1="30" x2="148" y2="67" stroke="#475569" strokeWidth="1.5" />
+                    {/* Pinky */}
+                    <circle cx="165" cy="45" r="5" 
+                      fill={activeFinger?.hand === 'right' && activeFinger?.finger === 'pinky' ? activeFinger.color : '#475569'} 
+                      className={activeFinger?.hand === 'right' && activeFinger?.finger === 'pinky' ? 'finger-pulse' : ''}
+                    />
+                    <line x1="165" y1="45" x2="160" y2="70" stroke="#475569" strokeWidth="1.5" />
+                  </svg>
+
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textAlign: 'center', lineHeight: '1.2rem' }}>
+                    Keep your fingers on <span style={{ color: 'var(--accent)', fontWeight: 600 }}>ASDF</span> and <span style={{ color: 'var(--accent)', fontWeight: 600 }}>JKL;</span> home rows.
                   </div>
                 </div>
               </div>
-
-              {/* Color Legend Finger Markers */}
-              <div className="flex gap-3" style={{ marginTop: '1rem', justifyContent: 'center', fontSize: '0.7rem', flexWrap: 'wrap', opacity: 0.85 }}>
-                <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#fda4af' }}></span> Pinkies
-                </span>
-                <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#fed7aa' }}></span> Rings
-                </span>
-                <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#fef08a' }}></span> Middles
-                </span>
-                <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#a7f3d0' }}></span> L Index
-                </span>
-                <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#99f6e4' }}></span> R Index
-                </span>
-                <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#bfdbfe' }}></span> R Middle
-                </span>
-                <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#e9d5ff' }}></span> R Ring
-                </span>
-                <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#fbcfe8' }}></span> R Pinky
-                </span>
-              </div>
             </div>
-
-            {/* Hands & guidance column (4 cols) */}
-            <div className="card flex-col flex-center col-span-4" style={{ gap: '1rem', padding: '1.5rem', justifyContent: 'space-between' }}>
-              <div style={{ textAlign: 'center', width: '100%' }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Finger Guide
-                </span>
-                {activeFinger ? (
-                  <div style={{ marginTop: '0.5rem', fontWeight: 700, fontSize: '1.05rem', color: activeFinger.color, textShadow: `0 0 8px ${activeFinger.color}33` }}>
-                    {activeFinger.name}
-                  </div>
-                ) : (
-                  <div style={{ marginTop: '0.5rem', fontWeight: 600, color: 'var(--text-dim)' }}>
-                    Strike Key
-                  </div>
-                )}
-              </div>
-
-              {/* Hands SVG representation */}
-              <svg className="hands-svg" width="180" height="110" viewBox="0 0 180 110" style={{ display: 'block', margin: '0 auto' }}>
-                {/* Left hand boundary */}
-                <path d="M10,85 C10,75 25,65 40,65 C55,65 70,75 70,85" stroke="var(--border)" fill="none" strokeWidth="1.5" />
-                {/* Left Fingers */}
-                {/* Pinky */}
-                <circle cx="15" cy="45" r="5" 
-                  fill={activeFinger?.hand === 'left' && activeFinger?.finger === 'pinky' ? activeFinger.color : '#475569'} 
-                  className={activeFinger?.hand === 'left' && activeFinger?.finger === 'pinky' ? 'finger-pulse' : ''}
-                />
-                <line x1="15" y1="45" x2="20" y2="70" stroke="#475569" strokeWidth="1.5" />
-                {/* Ring */}
-                <circle cx="30" cy="30" r="5" 
-                  fill={activeFinger?.hand === 'left' && activeFinger?.finger === 'ring' ? activeFinger.color : '#475569'} 
-                  className={activeFinger?.hand === 'left' && activeFinger?.finger === 'ring' ? 'finger-pulse' : ''}
-                />
-                <line x1="30" y1="30" x2="32" y2="67" stroke="#475569" strokeWidth="1.5" />
-                {/* Middle */}
-                <circle cx="48" cy="22" r="5" 
-                  fill={activeFinger?.hand === 'left' && activeFinger?.finger === 'middle' ? activeFinger.color : '#475569'} 
-                  className={activeFinger?.hand === 'left' && activeFinger?.finger === 'middle' ? 'finger-pulse' : ''}
-                />
-                <line x1="48" y1="22" x2="46" y2="65" stroke="#475569" strokeWidth="1.5" />
-                {/* Index */}
-                <circle cx="65" cy="32" r="5" 
-                  fill={activeFinger?.hand === 'left' && activeFinger?.finger === 'index' ? activeFinger.color : '#475569'} 
-                  className={activeFinger?.hand === 'left' && activeFinger?.finger === 'index' ? 'finger-pulse' : ''}
-                />
-                <line x1="65" y1="32" x2="58" y2="67" stroke="#475569" strokeWidth="1.5" />
-                {/* Thumb */}
-                <circle cx="80" cy="55" r="5" 
-                  fill={activeFinger?.hand === 'left' && activeFinger?.finger === 'thumb' ? activeFinger.color : '#475569'} 
-                  className={activeFinger?.hand === 'left' && activeFinger?.finger === 'thumb' ? 'finger-pulse' : ''}
-                />
-                <line x1="80" y1="55" x2="68" y2="75" stroke="#475569" strokeWidth="1.5" />
-
-                {/* Right hand boundary */}
-                <path d="M170,85 C170,75 155,65 140,65 C125,65 110,75 110,85" stroke="var(--border)" fill="none" strokeWidth="1.5" />
-                {/* Right Fingers */}
-                {/* Thumb */}
-                <circle cx="100" cy="55" r="5" 
-                  fill={activeFinger?.hand === 'right' && activeFinger?.finger === 'thumb' ? activeFinger.color : '#475569'} 
-                  className={activeFinger?.hand === 'right' && activeFinger?.finger === 'thumb' ? 'finger-pulse' : ''}
-                />
-                <line x1="100" y1="55" x2="112" y2="75" stroke="#475569" strokeWidth="1.5" />
-                {/* Index */}
-                <circle cx="115" cy="32" r="5" 
-                  fill={activeFinger?.hand === 'right' && activeFinger?.finger === 'index' ? activeFinger.color : '#475569'} 
-                  className={activeFinger?.hand === 'right' && activeFinger?.finger === 'index' ? 'finger-pulse' : ''}
-                />
-                <line x1="115" y1="32" x2="122" y2="67" stroke="#475569" strokeWidth="1.5" />
-                {/* Middle */}
-                <circle cx="132" cy="22" r="5" 
-                  fill={activeFinger?.hand === 'right' && activeFinger?.finger === 'middle' ? activeFinger.color : '#475569'} 
-                  className={activeFinger?.hand === 'right' && activeFinger?.finger === 'middle' ? 'finger-pulse' : ''}
-                />
-                <line x1="132" y1="22" x2="134" y2="65" stroke="#475569" strokeWidth="1.5" />
-                {/* Ring */}
-                <circle cx="150" cy="30" r="5" 
-                  fill={activeFinger?.hand === 'right' && activeFinger?.finger === 'ring' ? activeFinger.color : '#475569'} 
-                  className={activeFinger?.hand === 'right' && activeFinger?.finger === 'ring' ? 'finger-pulse' : ''}
-                />
-                <line x1="150" y1="30" x2="148" y2="67" stroke="#475569" strokeWidth="1.5" />
-                {/* Pinky */}
-                <circle cx="165" cy="45" r="5" 
-                  fill={activeFinger?.hand === 'right' && activeFinger?.finger === 'pinky' ? activeFinger.color : '#475569'} 
-                  className={activeFinger?.hand === 'right' && activeFinger?.finger === 'pinky' ? 'finger-pulse' : ''}
-                />
-                <line x1="165" y1="45" x2="160" y2="70" stroke="#475569" strokeWidth="1.5" />
-              </svg>
-
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textAlign: 'center', lineHeight: '1.2rem' }}>
-                Keep your fingers on <span style={{ color: 'var(--accent)', fontWeight: 600 }}>ASDF</span> and <span style={{ color: 'var(--accent)', fontWeight: 600 }}>JKL;</span> home rows.
-              </div>
-            </div>
-
-          </div>
+          )}
         </div>
-        )}
-        </div>
-
-        {/* Right Side: Sidebar Navigation panel (4 columns) */}
-        <div className="col-span-4 card flex-col" style={{ gap: '1rem', padding: '1.25rem', height: 'fit-content' }}>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <span>Curriculum Path</span>
-          </h3>
-
-          {/* Phase Selectors */}
-          <div className="flex gap-1" style={{ flexWrap: 'wrap', paddingBottom: '0.25rem', borderBottom: '1px solid var(--border)' }}>
-            {PHASES.map((phase) => (
-              <button
-                key={phase.code}
-                className={`phase-tab ${activePhase === phase.code ? 'active' : ''}`}
-                onClick={() => setActivePhase(phase.code)}
-                style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
-              >
-                {phase.label.replace(' & Symbols', '')}
-              </button>
-            ))}
-          </div>
-
-          {/* Lesson Navigation Selector Cards */}
-          <div className="stage-sidebar-container">
-            {filteredLessons.map((lesson) => {
-              const isSelected = activeLessonIdx === lesson.index;
-              const isCompletedPast = completedLessonIds.has(lesson.id);
-              const isUnlocked = lesson.index === 0 || completedLessonIds.has(lessons[lesson.index - 1].id);
-              
-              return (
-                <button
-                  key={lesson.id}
-                  disabled={!isUnlocked}
-                  style={{
-                    padding: '0.6rem 0.85rem',
-                    cursor: isUnlocked ? 'pointer' : 'not-allowed',
-                    border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border)',
-                    backgroundColor: isSelected ? 'rgba(14, 165, 233, 0.05)' : isUnlocked ? 'var(--bg-card)' : 'rgba(15, 23, 42, 0.4)',
-                    borderRadius: '0.375rem',
-                    textAlign: 'left',
-                    outline: 'none',
-                    transition: 'all 0.2s ease',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '0.5rem',
-                    width: '100%',
-                    opacity: isUnlocked ? 1 : 0.5
-                  }}
-                  onClick={() => handleSelectLesson(lesson.index)}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ fontSize: '0.65rem', color: isSelected ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 600 }}>
-                      Stage {lesson.id}
-                    </span>
-                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>
-                      {lesson.title.replace(/Stage \d+:\s*/, '')}
-                    </span>
-                  </div>
-                  {isCompletedPast && isUnlocked && (
-                    <CheckCircle size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
-                  )}
-                  {!isUnlocked && (
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>🔒</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
       </div>
     </div>
   );

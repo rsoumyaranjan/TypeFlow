@@ -9,6 +9,7 @@ import { ProgressView } from './components/ProgressView';
 import { About } from './components/About';
 import { Learn } from './components/Learn';
 import { Auth } from './components/Auth';
+import { Curriculum } from './components/Curriculum';
 import './App.css';
 import type { TypingTestSession } from './services/db';
 
@@ -22,6 +23,7 @@ function App() {
   const [soundOn, setSoundOn] = useState<boolean>(true);
   const [lastSession, setLastSession] = useState<Omit<TypingTestSession, 'id'> | null>(null);
   const [practiceWords, setPracticeWords] = useState<string[]>([]);
+  const [activeStageIdx, setActiveStageIdx] = useState<number>(0);
 
   // Map react-router paths to highlight header nav tabs
   const getActiveTab = (): Page => {
@@ -29,7 +31,7 @@ function App() {
     if (path === '/' || path === '/dashboard') return 'dashboard';
     if (path === '/test' || path === '/results') return 'test';
     if (path === '/practice') return 'practice';
-    if (path === '/learn') return 'learn';
+    if (path === '/learn' || path === '/curriculum' || path.startsWith('/stage/')) return 'learn';
     if (path === '/progress') return 'progress';
     if (path === '/about') return 'about';
     return 'dashboard';
@@ -46,7 +48,7 @@ function App() {
       case 'practice': navigate('/practice'); break;
       case 'progress': navigate('/progress'); break;
       case 'about': navigate('/about'); break;
-      case 'learn': navigate('/learn'); break;
+      case 'learn': navigate('/curriculum'); break;
       default: navigate('/');
     }
   };
@@ -68,7 +70,7 @@ function App() {
           navigate('/progress');
         } else if (key === 'l') {
           e.preventDefault();
-          navigate('/learn');
+          navigate('/curriculum');
         }
       }
     };
@@ -131,12 +133,15 @@ function App() {
     } else if (path === '/practice') {
       title = "Practice Drills — Targeted Muscle Memory | TypeFlow";
       description = "Build typing speed and accuracy by practicing targeted drills on words you struggled with during typing tests.";
-    } else if (path === '/learn') {
-      title = "Learn Touch Typing — Home Row Finger Placements | TypeFlow";
-      description = "Master touch-typing basics. Learn proper finger placement with home-row exercises and interactive keyboard guides.";
+    } else if (path === '/curriculum') {
+      title = "Touch Typing Curriculum — 500 Chapters | TypeFlow";
+      description = "Study typing lessons systematically through a 500-stage typing curriculum.";
+    } else if (path.startsWith('/stage/')) {
+      title = "Touch Typing Academy Stage Practice | TypeFlow";
+      description = "Focus on typing accuracy and speed during active curriculum stages.";
     } else if (path === '/progress') {
-      title = "Your Typing Progress — Stats & Analytics | TypeFlow";
-      description = "Track your typing test history, personal speed records, and view heatmaps of your keyboard accuracy.";
+      title = "Your Typing Progress — Historical Trends | TypeFlow";
+      description = "Monitor your improvement trends. See visual progress charts tracking average speed, accuracy, and practice times.";
     } else if (path === '/about') {
       title = "About TypeFlow — Privacy & Local-First Typing";
       description = "Learn about TypeFlow's local-first architecture. We do not collect cookies or track personal data.";
@@ -156,88 +161,92 @@ function App() {
     navigate('/practice');
   };
 
+  const isStagePage = location.pathname.startsWith('/stage/');
+
   return (
     <>
-      {/* Navigation Header */}
-      <header className="app-header">
-        <button 
-          className="logo-container" 
-          onClick={() => navigate('/')}
-          aria-label="Navigate to dashboard"
-        >
-          <div className="logo-icon">
-            <Keyboard size={28} />
-          </div>
-          <span className="logo-text">TypeFlow</span>
-        </button>
-
-        <nav className="app-nav">
+      {/* Navigation Header - Hiding header navigation if user is on active Stage page to maximize focus */}
+      {!isStagePage && (
+        <header className="app-header">
           <button 
-            className={`nav-tab ${activeTab === 'dashboard' ? 'active' : ''}`}
+            className="logo-container" 
             onClick={() => navigate('/')}
+            aria-label="Navigate to dashboard"
           >
-            Dashboard
-          </button>
-          <button 
-            className={`nav-tab ${activeTab === 'test' ? 'active' : ''}`}
-            onClick={() => navigate('/test')}
-          >
-            Test
-          </button>
-          <button 
-            className={`nav-tab ${activeTab === 'practice' ? 'active' : ''}`}
-            onClick={() => navigate('/practice')}
-          >
-            Practice
-          </button>
-          <button 
-            className={`nav-tab ${activeTab === 'learn' ? 'active' : ''}`}
-            onClick={() => navigate('/learn')}
-          >
-            Learn
-          </button>
-          <button 
-            className={`nav-tab ${activeTab === 'progress' ? 'active' : ''}`}
-            onClick={() => navigate('/progress')}
-          >
-            Progress
-          </button>
-          <button 
-            className={`nav-tab ${activeTab === 'about' ? 'active' : ''}`}
-            onClick={() => navigate('/about')}
-          >
-            About
-          </button>
-        </nav>
-
-        <div className="header-settings">
-          {/* Optional User Nickname Auth Profile */}
-          <Auth />
-
-          {/* Sound Toggle */}
-          <button 
-            className="icon-btn" 
-            onClick={() => setSoundOn(!soundOn)}
-            title={soundOn ? "Mute sounds" : "Enable sounds"}
-            aria-label={soundOn ? "Mute sounds" : "Enable sounds"}
-          >
-            {soundOn ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            <div className="logo-icon">
+              <Keyboard size={28} />
+            </div>
+            <span className="logo-text">TypeFlow</span>
           </button>
 
-          {/* Theme Toggle */}
-          <button 
-            className="icon-btn" 
-            onClick={() => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'sepia' : 'dark')}
-            title={`Switch to ${theme === 'dark' ? 'Light' : theme === 'light' ? 'Sepia' : 'Dark'} theme`}
-            aria-label="Toggle theme color"
-          >
-            {theme === 'dark' ? <Sun size={18} /> : theme === 'light' ? <Palette size={18} /> : <Moon size={18} />}
-          </button>
-        </div>
-      </header>
+          <nav className="app-nav">
+            <button 
+              className={`nav-tab ${activeTab === 'dashboard' ? 'active' : ''}`}
+              onClick={() => navigate('/')}
+            >
+              Dashboard
+            </button>
+            <button 
+              className={`nav-tab ${activeTab === 'test' ? 'active' : ''}`}
+              onClick={() => navigate('/test')}
+            >
+              Test
+            </button>
+            <button 
+              className={`nav-tab ${activeTab === 'practice' ? 'active' : ''}`}
+              onClick={() => navigate('/practice')}
+            >
+              Practice
+            </button>
+            <button 
+              className={`nav-tab ${activeTab === 'learn' ? 'active' : ''}`}
+              onClick={() => navigate('/curriculum')}
+            >
+              Learn
+            </button>
+            <button 
+              className={`nav-tab ${activeTab === 'progress' ? 'active' : ''}`}
+              onClick={() => navigate('/progress')}
+            >
+              Progress
+            </button>
+            <button 
+              className={`nav-tab ${activeTab === 'about' ? 'active' : ''}`}
+              onClick={() => navigate('/about')}
+            >
+              About
+            </button>
+          </nav>
+
+          <div className="header-settings">
+            {/* Optional User Nickname Auth Profile */}
+            <Auth />
+
+            {/* Sound Toggle */}
+            <button 
+              className="icon-btn" 
+              onClick={() => setSoundOn(!soundOn)}
+              title={soundOn ? "Mute sounds" : "Enable sounds"}
+              aria-label={soundOn ? "Mute sounds" : "Enable sounds"}
+            >
+              {soundOn ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            </button>
+
+            {/* Theme Toggle */}
+            <button 
+              className="icon-btn" 
+              onClick={() => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'sepia' : 'dark')}
+              title={`Switch to ${theme === 'dark' ? 'Light' : theme === 'light' ? 'Sepia' : 'Dark'} theme`}
+              aria-label="Toggle theme color"
+            >
+              {theme === 'dark' ? <Sun size={18} /> : theme === 'light' ? <Palette size={18} /> : <Moon size={18} />}
+            </button>
+          </div>
+        </header>
+      )}
 
       {/* Main View Container */}
-      <main className="main-content">
+      <main className="main-content" style={{ paddingTop: isStagePage ? '2rem' : '6rem' }}>
         <Routes>
           <Route path="/" element={
             <Dashboard 
@@ -267,8 +276,18 @@ function App() {
               practiceWords={practiceWords} 
             />
           } />
-          <Route path="/learn" element={
+          <Route path="/curriculum" element={
+            <Curriculum 
+              onSelectStage={(idx) => {
+                setActiveStageIdx(idx);
+                navigate(`/stage/${idx}`);
+              }} 
+            />
+          } />
+          <Route path="/stage/:id" element={
             <Learn 
+              stageIndex={activeStageIdx}
+              onBackToCurriculum={() => navigate('/curriculum')}
               onNavigate={handleNavigate} 
             />
           } />
@@ -284,14 +303,16 @@ function App() {
       </main>
 
       {/* Persistent Footer */}
-      <footer className="app-footer">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-          <span>&copy; {new Date().getFullYear()} TypeFlow. Local-first, open-source.</span>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            Tip: Press <span className="shortcut-hint">Ctrl + Alt + t</span> for test, <span className="shortcut-hint">Ctrl + Alt + d</span> for dashboard, <span className="shortcut-hint">Ctrl + Alt + p</span> for progress.
-          </span>
-        </div>
-      </footer>
+      {!isStagePage && (
+        <footer className="app-footer">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <span>&copy; {new Date().getFullYear()} TypeFlow. Local-first, open-source.</span>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              Tip: Press <span className="shortcut-hint">Ctrl + Alt + t</span> for test, <span className="shortcut-hint">Ctrl + Alt + d</span> for dashboard, <span className="shortcut-hint">Ctrl + Alt + p</span> for progress.
+            </span>
+          </div>
+        </footer>
+      )}
     </>
   );
 }
