@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, CheckCircle, RotateCcw, ArrowRight, Keyboard, XCircle, Award } from 'lucide-react';
+import { RotateCcw, ArrowRight, Keyboard, XCircle, Award } from 'lucide-react';
 import { saveLessonAttempt, getLessonHistory } from '../services/db';
 import { lessons } from '../utils/lessonsData';
 
 interface LearnProps {
+  stageIndex: number;
+  onBackToCurriculum: () => void;
   onNavigate: (page: 'dashboard' | 'test' | 'results' | 'practice' | 'progress' | 'about') => void;
   onStartPractice?: (words: string[]) => void;
 }
@@ -97,19 +99,21 @@ const getFingerInfo = (char: string | undefined): { hand: 'left' | 'right'; fing
  * Interactive touch-typing guide tutorial component.
  * Allows users to learn lesson-by-lesson using a visual finger layout, error indicators, and graduation benchmarks.
  */
-export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
-  const [activeLessonIdx, setActiveLessonIdx] = useState<number>(0);
+export const Learn: React.FC<LearnProps> = ({ stageIndex, onBackToCurriculum, onNavigate }) => {
+  const [activeLessonIdx, setActiveLessonIdx] = useState<number>(stageIndex);
   const [charPointer, setCharPointer] = useState<number>(0);
   const [hasError, setHasError] = useState<boolean>(false);
   const [pressedKey, setPressedKey] = useState<string | null>(null);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [errorsCount, setErrorsCount] = useState<number>(0);
   
-  // Phase Filtering State (grouping lessons by home row, extensions, coordination, symbols, etc.)
-  const [activePhase, setActivePhase] = useState<typeof PHASES[number]['code']>('home-row');
-  
-  // Track unique lesson IDs completed in the session or db
-  const [completedLessonIds, setCompletedLessonIds] = useState<Set<number>>(new Set());
+  // Sync active index when prop updates from parent
+  useEffect(() => {
+    setActiveLessonIdx(stageIndex);
+  }, [stageIndex]);
+
+  // Track completed lesson list
+  const [, setCompletedLessonIds] = useState<Set<number>>(new Set());
 
   // Graduation status results upon lesson completion
   const [finalStats, setFinalStats] = useState<{
@@ -118,6 +122,9 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
     graduated: boolean;
     duration: number;
   } | null>(null);
+
+  const [failedAttempts, setFailedAttempts] = useState<number>(0);
+  const isDefaultTarget = !localStorage.getItem('typeflow_custom_target_wpm') && !localStorage.getItem('typeflow_custom_target_acc');
 
   const activeLesson = lessons[activeLessonIdx];
   const targetText = activeLesson.target;
@@ -162,8 +169,15 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
       const finalWpm = Math.round((targetText.length / 5) / (durationSeconds / 60));
       const finalAccuracy = Math.round((targetText.length / (targetText.length + errorsCount)) * 100);
       
-      // Graduation thresholds: >= 25 WPM speed and >= 98% typing accuracy
-      const isGraduated = finalAccuracy >= 98 && finalWpm >= 25;
+      const targetWpm = parseInt(localStorage.getItem('typeflow_custom_target_wpm') || '25');
+      const targetAcc = parseInt(localStorage.getItem('typeflow_custom_target_acc') || '98');
+      const isGraduated = finalAccuracy >= targetAcc && finalWpm >= targetWpm;
+
+      if (!isGraduated) {
+        setFailedAttempts(prev => prev + 1);
+      } else {
+        setFailedAttempts(0);
+      }
 
       setFinalStats({
         wpm: finalWpm,
@@ -193,7 +207,21 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
   // Handle keystrokes on the interactive keyboard listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (charPointerRef.current >= targetText.length) return;
+      // Handle Enter hotkey when stage completes
+      if (charPointerRef.current >= targetText.length) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (finalStats) {
+            if (finalStats.graduated) {
+              handleNextLesson();
+            } else {
+              handleRestart();
+            }
+          }
+        }
+        return;
+      }
+
       if (e.ctrlKey || e.altKey || e.metaKey) return;
 
       // Prevent window scroll behavior when hitting the spacebar
@@ -246,7 +274,7 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [targetText, hasError]);
+  }, [targetText, hasError, finalStats]);
 
   const handleRestart = () => {
     charPointerRef.current = 0;
@@ -262,7 +290,6 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
     if (activeLessonIdx < lessons.length - 1) {
       const nextIdx = activeLessonIdx + 1;
       setActiveLessonIdx(nextIdx);
-      setActivePhase(lessons[nextIdx].phase);
       charPointerRef.current = 0;
       setCharPointer(0);
       setHasError(false);
@@ -271,21 +298,6 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
       setErrorsCount(0);
       setFinalStats(null);
     }
-  };
-
-  const handleSelectLesson = (idx: number) => {
-    // Stage unlocking pathway: verify if the preceding lesson stage is completed
-    const isUnlocked = idx === 0 || completedLessonIds.has(lessons[idx - 1].id);
-    if (!isUnlocked) return;
-
-    setActiveLessonIdx(idx);
-    charPointerRef.current = 0;
-    setCharPointer(0);
-    setHasError(false);
-    setPressedKey(null);
-    setStartTime(null);
-    setErrorsCount(0);
-    setFinalStats(null);
   };
 
   // Build styles dynamically to highlight active, targets, or pressed keyboard keys
@@ -357,7 +369,6 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
   };
 
   const activeFinger = getFingerInfo(currentTargetChar);
-  const filteredLessons = lessons.map((l, i) => ({ ...l, index: i })).filter(l => l.phase === activePhase);
 
   return (
     <div className="flex-col gap-6" style={{ maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
@@ -412,22 +423,28 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
         }
       `}</style>
 
-      {/* Page Title */}
+      {/* Page Title with Navigation back button */}
       <div className="flex" style={{ alignItems: 'center', gap: '0.5rem', justifyContent: 'space-between' }}>
-        <div className="flex" style={{ alignItems: 'center', gap: '0.5rem' }}>
-          <BookOpen size={24} style={{ color: 'var(--accent)' }} />
-          <h2>Touch-Typing Academy ({activeLessonIdx + 1}/{lessons.length})</h2>
+        <div className="flex" style={{ alignItems: 'center', gap: '0.75rem' }}>
+          <button 
+            className="btn btn-secondary" 
+            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }}
+            onClick={onBackToCurriculum}
+          >
+            &larr; Back to Curriculum
+          </button>
+          <h2>Touch-Typing Academy (Stage {activeLesson.id})</h2>
         </div>
         <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
           Phase: {PHASES.find(p => p.code === activeLesson.phase)?.label}
         </span>
       </div>
 
-      {/* Two-Column Grid: Left Tutor, Right Stage Sidebar */}
-      <div className="grid grid-cols-12" style={{ gap: '1.5rem', alignItems: 'start' }}>
+      {/* Main Grid: Centered tutor card */}
+      <div className="flex-col" style={{ width: '100%', maxWidth: '850px', margin: '0 auto' }}>
         
-        {/* Left Column: Tutor Window */}
-        <div className="col-span-8 flex-col gap-6">
+        {/* Left Side: interactive typing screen */}
+        <div className="flex-col gap-6" style={{ width: '100%' }}>
           {isCompleted && finalStats ? (
             /* STAGE RESULTS SCORECARD */
             <div 
@@ -463,26 +480,31 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
                 <p style={{ color: 'var(--text-dim)', maxWidth: '520px', margin: '0 auto', fontSize: '0.95rem' }}>
                   {finalStats.graduated 
                     ? `Sensational! You cleared the QWERTY thresholds for Stage ${activeLesson.id}. You can now unlock the next stage.`
-                    : `You finished the typing buffer, but failed to meet graduation thresholds. You must achieve at least 25 WPM and 98% Accuracy.`}
+                    : `You finished the typing buffer, but failed to meet graduation thresholds. You must achieve at least ${localStorage.getItem('typeflow_custom_target_wpm') || '25'} WPM and ${localStorage.getItem('typeflow_custom_target_acc') || '98'}% Accuracy.`}
                 </p>
+                {!finalStats.graduated && failedAttempts >= 2 && isDefaultTarget && (
+                  <p style={{ color: 'var(--warning)', fontSize: '0.85rem', fontWeight: 600, marginTop: '0.5rem' }}>
+                    Tip: You can lower your target WPM &amp; accuracy settings in the Profile &gt; Settings panel.
+                  </p>
+                )}
               </div>
 
               {/* Score breakdown metrics cards */}
               <div className="flex gap-6" style={{ justifyContent: 'center', width: '100%', margin: '1rem 0' }}>
                 <div className="card flex-col flex-center" style={{ padding: '1rem', minWidth: '130px' }}>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Your Speed</span>
-                  <span style={{ fontSize: '1.75rem', fontWeight: 700, color: finalStats.wpm >= 25 ? 'var(--success)' : 'var(--danger)' }}>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 700, color: finalStats.wpm >= parseInt(localStorage.getItem('typeflow_custom_target_wpm') || '25') ? 'var(--success)' : 'var(--danger)' }}>
                     {finalStats.wpm} <span style={{ fontSize: '0.85rem' }}>WPM</span>
                   </span>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Target: &ge; 25 WPM</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Target: &ge; {localStorage.getItem('typeflow_custom_target_wpm') || '25'} WPM</span>
                 </div>
                 
                 <div className="card flex-col flex-center" style={{ padding: '1rem', minWidth: '130px' }}>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Your Accuracy</span>
-                  <span style={{ fontSize: '1.75rem', fontWeight: 700, color: finalStats.accuracy >= 98 ? 'var(--success)' : 'var(--danger)' }}>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 700, color: finalStats.accuracy >= parseInt(localStorage.getItem('typeflow_custom_target_acc') || '98') ? 'var(--success)' : 'var(--danger)' }}>
                     {finalStats.accuracy}%
                   </span>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Target: &ge; 98%</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Target: &ge; {localStorage.getItem('typeflow_custom_target_acc') || '98'}%</span>
                 </div>
 
                 <div className="card flex-col flex-center" style={{ padding: '1rem', minWidth: '130px' }}>
@@ -532,82 +554,96 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
                   {hasError && (
                     <span className="flex" style={{ color: 'var(--danger)', fontSize: '0.85rem', fontWeight: 600, alignItems: 'center', gap: '0.25rem' }}>
                       <XCircle size={14} /> Please press Backspace to clear error
-                    </span>
+                  </span>
                   )}
                 </div>
                 
-                {/* Typing buffer screen rendered as individual box grid (EdClub style) */}
+                {/* Typing buffer screen rendered as individual box grid (EdClub style, paginated view of 10 characters) */}
                 <div 
                   style={{
                     display: 'flex',
                     flexWrap: 'wrap',
                     gap: '0.4rem',
                     marginTop: '0.5rem',
-                    padding: '0.25rem'
+                    padding: '0.25rem',
+                    justifyContent: 'center'
                   }}
                 >
-                  {targetText.split('').map((char, index) => {
-                    const isCorrect = index < charPointer;
-                    const isActive = index === charPointer;
-                    const isErrorActive = isActive && hasError;
-
-                    let boxBg = 'var(--bg-card)';
-                    let boxBorder = 'var(--border)';
-                    let boxColor = 'var(--text-dim)';
-                    let boxScale = '1';
-                    let animationName = 'none';
-
-                    if (isCorrect) {
-                      boxBg = 'rgba(16, 185, 129, 0.15)';
-                      boxBorder = 'var(--success)';
-                      boxColor = 'var(--success)';
-                      boxScale = '1.05';
-                      animationName = 'pop 0.2s ease-out';
-                    } else if (isErrorActive) {
-                      boxBg = 'rgba(244, 63, 94, 0.2)';
-                      boxBorder = 'var(--danger)';
-                      boxColor = '#ffffff';
-                      boxScale = '0.95';
-                      animationName = 'shake 0.2s ease-in-out';
-                    } else if (isActive) {
-                      boxBg = 'rgba(14, 165, 233, 0.1)';
-                      boxBorder = 'var(--accent)';
-                      boxColor = 'var(--accent)';
+                  {(() => {
+                    const maxVisible = 10;
+                    const half = Math.floor(maxVisible / 2);
+                    let start = charPointer - half;
+                    if (start < 0) start = 0;
+                    let end = start + maxVisible;
+                    if (end > targetText.length) {
+                      end = targetText.length;
+                      start = Math.max(0, end - maxVisible);
                     }
 
-                    return (
-                      <div
-                        key={index}
-                        style={{
-                          width: '32px',
-                          height: '36px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          borderRadius: '0.25rem',
-                          border: `1px solid ${boxBorder}`,
-                          backgroundColor: boxBg,
-                          color: boxColor,
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '1.25rem',
-                          fontWeight: 700,
-                          transform: `scale(${boxScale})`,
-                          transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
-                          animation: animationName,
-                          boxShadow: isActive ? '0 0 8px var(--accent-glow)' : 'none'
-                        }}
-                      >
-                        {char === ' ' ? '\u2423' : char}
-                      </div>
-                    );
-                  })}
+                    return targetText.slice(start, end).split('').map((char, relativeIdx) => {
+                      const absoluteIdx = start + relativeIdx;
+                      const isCorrect = absoluteIdx < charPointer;
+                      const isActive = absoluteIdx === charPointer;
+                      const isErrorActive = isActive && hasError;
+
+                      let boxBg = 'var(--bg-card)';
+                      let boxBorder = 'var(--border)';
+                      let boxColor = 'var(--text-dim)';
+                      let boxScale = '1';
+                      let animationName = 'none';
+
+                      if (isCorrect) {
+                        boxBg = 'rgba(16, 185, 129, 0.15)';
+                        boxBorder = 'var(--success)';
+                        boxColor = 'var(--success)';
+                        boxScale = '1.05';
+                        animationName = 'pop 0.2s ease-out';
+                      } else if (isErrorActive) {
+                        boxBg = 'rgba(244, 63, 94, 0.2)';
+                        boxBorder = 'var(--danger)';
+                        boxColor = '#ffffff';
+                        boxScale = '0.95';
+                        animationName = 'shake 0.2s ease-in-out';
+                      } else if (isActive) {
+                        boxBg = 'rgba(14, 165, 233, 0.1)';
+                        boxBorder = 'var(--accent)';
+                        boxColor = 'var(--accent)';
+                      }
+
+                      return (
+                        <div
+                          key={absoluteIdx}
+                          style={{
+                            width: '46px',
+                            height: '52px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: '0.35rem',
+                            border: `1px solid ${boxBorder}`,
+                            backgroundColor: boxBg,
+                            color: boxColor,
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '1.75rem',
+                            fontWeight: 700,
+                            transform: `scale(${boxScale})`,
+                            transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+                            animation: animationName,
+                            boxShadow: isActive ? '0 0 10px var(--accent-glow)' : 'none'
+                          }}
+                        >
+                          {char === ' ' ? '\u2423' : char}
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
 
               {/* Virtual Hands and Keyboard Overlay */}
               <div className="grid grid-cols-12" style={{ gap: '1.5rem' }}>
                 
-                {/* Keyboard overlay (8 columns) */}
+                {/* Keyboard guide column (8 cols) */}
                 <div className="card flex-col flex-center col-span-8" style={{ gap: '0.75rem', padding: '1.5rem' }}>
                   <div className="flex-col gap-2" style={{ width: '100%' }}>
                     {keyboardRows.map((row, rIdx) => (
@@ -663,7 +699,7 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
                     </div>
                   </div>
 
-                  {/* Finger Colors Legend */}
+                  {/* Color Legend Finger Markers */}
                   <div className="flex gap-3" style={{ marginTop: '1rem', justifyContent: 'center', fontSize: '0.7rem', flexWrap: 'wrap', opacity: 0.85 }}>
                     <span className="flex" style={{ alignItems: 'center', gap: '0.3rem' }}>
                       <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#fda4af' }}></span> Pinkies
@@ -692,7 +728,7 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
                   </div>
                 </div>
 
-                {/* Hand Guidance HUD (4 columns) */}
+                {/* Hands & guidance column (4 cols) */}
                 <div className="card flex-col flex-center col-span-4" style={{ gap: '1rem', padding: '1.5rem', justifyContent: 'space-between' }}>
                   <div style={{ textAlign: 'center', width: '100%' }}>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -709,7 +745,7 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
                     )}
                   </div>
 
-                  {/* Svg hands representation */}
+                  {/* Hands SVG representation */}
                   <svg className="hands-svg" width="180" height="110" viewBox="0 0 180 110" style={{ display: 'block', margin: '0 auto' }}>
                     <path d="M10,85 C10,75 25,65 40,65 C55,65 70,75 70,85" stroke="var(--border)" fill="none" strokeWidth="1.5" />
                     <circle cx="15" cy="45" r="5" 
@@ -775,84 +811,13 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
                   </svg>
 
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textAlign: 'center', lineHeight: '1.2rem' }}>
-                    Keep fingers on resting home row keys <span style={{ color: 'var(--accent)', fontWeight: 600 }}>ASDF</span> and <span style={{ color: 'var(--accent)', fontWeight: 600 }}>JKL;</span>.
+                    Keep your fingers on <span style={{ color: 'var(--accent)', fontWeight: 600 }}>ASDF</span> and <span style={{ color: 'var(--accent)', fontWeight: 600 }}>JKL;</span> home rows.
                   </div>
                 </div>
-
               </div>
             </div>
           )}
         </div>
-
-        {/* Right Column: Sidebar Navigation Panel (4 columns) */}
-        <div className="col-span-4 card flex-col" style={{ gap: '1rem', padding: '1.25rem', height: 'fit-content' }}>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <span>Curriculum Path</span>
-          </h3>
-
-          {/* Phase selectors inside sidebar */}
-          <div className="flex gap-1" style={{ flexWrap: 'wrap', paddingBottom: '0.25rem', borderBottom: '1px solid var(--border)' }}>
-            {PHASES.map((phase) => (
-              <button
-                key={phase.code}
-                className={`phase-tab ${activePhase === phase.code ? 'active' : ''}`}
-                onClick={() => setActivePhase(phase.code)}
-                style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
-              >
-                {phase.label.replace(' & Symbols', '')}
-              </button>
-            ))}
-          </div>
-
-          {/* Stages List */}
-          <div className="stage-sidebar-container">
-            {filteredLessons.map((lesson) => {
-              const isSelected = activeLessonIdx === lesson.index;
-              const isCompletedPast = completedLessonIds.has(lesson.id);
-              const isUnlocked = lesson.index === 0 || completedLessonIds.has(lessons[lesson.index - 1].id);
-              
-              return (
-                <button
-                  key={lesson.id}
-                  disabled={!isUnlocked}
-                  style={{
-                    padding: '0.6rem 0.85rem',
-                    cursor: isUnlocked ? 'pointer' : 'not-allowed',
-                    border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border)',
-                    backgroundColor: isSelected ? 'rgba(14, 165, 233, 0.05)' : isUnlocked ? 'var(--bg-card)' : 'rgba(15, 23, 42, 0.4)',
-                    borderRadius: '0.375rem',
-                    textAlign: 'left',
-                    outline: 'none',
-                    transition: 'all 0.2s ease',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '0.5rem',
-                    width: '100%',
-                    opacity: isUnlocked ? 1 : 0.5
-                  }}
-                  onClick={() => handleSelectLesson(lesson.index)}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ fontSize: '0.65rem', color: isSelected ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 600 }}>
-                      Stage {lesson.id}
-                    </span>
-                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>
-                      {lesson.title.replace(/Stage \d+:\s*/, '')}
-                    </span>
-                  </div>
-                  {isCompletedPast && isUnlocked && (
-                    <CheckCircle size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
-                  )}
-                  {!isUnlocked && (
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>🔒</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
       </div>
     </div>
   );

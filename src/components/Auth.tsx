@@ -17,11 +17,14 @@ export const Auth: React.FC<AuthProps> = ({ onAuthChange }) => {
   const [showDropdown, setShowDropdown] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
 
   // Stats for Settings
   const [userGender, setUserGender] = useState('other');
   const [userAge, setUserAge] = useState('');
   const [userEmail, setUserEmail] = useState('');
+  const [targetWpmState, setTargetWpmState] = useState(localStorage.getItem('typeflow_custom_target_wpm') || '25');
+  const [targetAccState, setTargetAccState] = useState(localStorage.getItem('typeflow_custom_target_acc') || '98');
 
   useEffect(() => {
     const savedUser = localStorage.getItem('typeflow_active_user');
@@ -31,7 +34,9 @@ export const Auth: React.FC<AuthProps> = ({ onAuthChange }) => {
       setUserAge(localStorage.getItem('typeflow_user_age') || '');
       setUserEmail(localStorage.getItem('typeflow_user_email') || '');
     }
-  }, [showModal]);
+    setTargetWpmState(localStorage.getItem('typeflow_custom_target_wpm') || '25');
+    setTargetAccState(localStorage.getItem('typeflow_custom_target_acc') || '98');
+  }, [showLoginModal, showSettingsModal]);
 
   const handleCreateAccount = (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,7 +66,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthChange }) => {
       setEmail('');
       setAge('');
       setIsVerifying(false);
-      setShowModal(false);
+      setShowLoginModal(false);
       if (onAuthChange) onAuthChange();
     } else {
       alert("Incorrect verification code. Please try again.");
@@ -114,7 +119,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthChange }) => {
             <div style={{
               position: 'absolute',
               top: '40px',
-              right: 0,
+              right: '0px',
               backgroundColor: 'var(--bg-card)',
               border: '1px solid var(--border)',
               borderRadius: '0.5rem',
@@ -151,14 +156,14 @@ export const Auth: React.FC<AuthProps> = ({ onAuthChange }) => {
         <button 
           className="btn btn-secondary" 
           style={{ padding: '0.4rem 0.85rem', fontSize: '0.85rem' }} 
-          onClick={() => setShowModal(true)}
+          onClick={() => setShowLoginModal(true)}
         >
           <LogIn size={14} />
           <span>Login</span>
         </button>
       )}
 
-      {showModal && (
+      {showLoginModal && (
         <div style={{
           position: 'fixed',
           inset: 0,
@@ -277,7 +282,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthChange }) => {
                 <button 
                   type="button" 
                   className="btn btn-secondary" 
-                  onClick={() => setShowModal(false)}
+                  onClick={() => setShowLoginModal(false)}
                 >
                   Cancel
                 </button>
@@ -394,9 +399,47 @@ export const Auth: React.FC<AuthProps> = ({ onAuthChange }) => {
         }}>
           <div className="card flex-col" style={{ width: '100%', maxWidth: '380px', padding: '2rem', gap: '1rem', backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)' }}>
             <h3 style={{ margin: 0, borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>Account Settings</h3>
-            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-              Configure your offline account profile statistics persistence.
-            </p>
+            
+            <div className="flex-col gap-2" style={{ margin: '0.5rem 0' }}>
+              <div className="flex-col gap-1">
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-dim)', fontWeight: 600 }}>
+                  TARGET SPEED (WPM): <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{targetWpmState}</span>
+                </label>
+                <input
+                  type="range"
+                  min="10"
+                  max="120"
+                  step="5"
+                  value={targetWpmState}
+                  onChange={(e) => {
+                    setTargetWpmState(e.target.value);
+                    localStorage.setItem('typeflow_custom_target_wpm', e.target.value);
+                    if (onAuthChange) onAuthChange();
+                  }}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div className="flex-col gap-1" style={{ marginTop: '0.5rem' }}>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-dim)', fontWeight: 600 }}>
+                  TARGET ACCURACY (%): <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{targetAccState}%</span>
+                </label>
+                <input
+                  type="range"
+                  min="80"
+                  max="100"
+                  step="1"
+                  value={targetAccState}
+                  onChange={(e) => {
+                    setTargetAccState(e.target.value);
+                    localStorage.setItem('typeflow_custom_target_acc', e.target.value);
+                    if (onAuthChange) onAuthChange();
+                  }}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            </div>
+
             <button className="btn btn-secondary" style={{ marginTop: '0.5rem' }} onClick={() => setShowSettingsModal(false)}>Close</button>
           </div>
         </div>

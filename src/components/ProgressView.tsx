@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import React, { useState, useEffect, useRef } from 'react';
-import { BarChart2, Download, Trash2, ShieldAlert, Award, Upload, CheckCircle, RotateCcw } from 'lucide-react';
+import { BarChart2, Download, Trash2, ShieldAlert, Award, Upload } from 'lucide-react';
 import {
   getTestHistory,
   getPersonalBests,
@@ -326,53 +326,65 @@ export const ProgressView = () => {
         </div>
       </div>
 
-      {/* Lesson Progress Checklist */}
+      {/* Lesson Progress Summary Category Metrics */}
       <div className="card flex-col">
         <h3 className="card-title">Touch-Typing Curriculum Progress</h3>
-        <p className="card-desc">Checklist of lessons completed to build standard touch-typing habits.</p>
-        <div className="grid grid-cols-3" style={{ marginTop: '1rem', gap: '1rem' }}>
-          {LESSONS_LIST.map((lesson) => {
-            const attempts = lessonsHistory.filter((h) => h.lessonId === lesson.id);
-            const isCompleted = attempts.length > 0;
-            const bestAttempt = isCompleted
-              ? attempts.reduce((best, curr) => curr.errorsCount < best.errorsCount ? curr : best, attempts[0])
-              : null;
+        <p className="card-desc">Your completion summary statistics per category path module.</p>
+        <div className="grid grid-cols-5" style={{ marginTop: '1.25rem', gap: '1rem' }}>
+          {[
+            { code: 'home-row', label: 'Home Row' },
+            { code: 'extensions', label: 'Extensions' },
+            { code: 'coordination', label: 'Coordination' },
+            { code: 'numbers-symbols', label: 'Numbers & Symbols' },
+            { code: 'advanced', label: 'Advanced' }
+          ].map((phase) => {
+            const phaseLessons = LESSONS_LIST.filter(l => l.phase === phase.code);
+            const totalCount = phaseLessons.length;
+            const completedCount = phaseLessons.filter(l => lessonsHistory.some(h => h.lessonId === l.id)).length;
+            const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
             return (
-              <div
-                key={lesson.id}
-                className="flex-col card"
-                style={{
-                  padding: '1.25rem',
-                  backgroundColor: isCompleted ? 'rgba(16, 185, 129, 0.03)' : 'var(--bg-card)',
-                  borderColor: isCompleted ? 'rgba(16, 185, 129, 0.2)' : 'var(--border)',
-                  gap: '0.25rem'
+              <div 
+                key={phase.code} 
+                className="card flex-col flex-center"
+                style={{ 
+                  padding: '1.5rem 1.25rem', 
+                  backgroundColor: percentage === 100 ? 'rgba(16, 185, 129, 0.04)' : 'var(--bg-card)', 
+                  border: percentage === 100 ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--border)',
+                  gap: '0.75rem',
+                  textAlign: 'center',
+                  borderRadius: '0.5rem'
                 }}
               >
-                <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
-                  <h4 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text)', margin: 0 }}>{lesson.title}</h4>
-                  {isCompleted ? (
-                    <span style={{ color: 'var(--success)' }} title="Completed">
-                      <CheckCircle size={20} fill="rgba(16, 185, 129, 0.1)" />
-                    </span>
-                  ) : (
-                    <span style={{ color: 'var(--text-muted)' }} title="Not completed">
-                      <RotateCcw size={20} style={{ opacity: 0.5 }} />
-                    </span>
-                  )}
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.025em' }}>
+                  {phase.label}
+                </span>
+
+                {/* Progress Wheel Gauge Ring */}
+                <div style={{ position: 'relative', width: '70px', height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg width="70" height="70" style={{ transform: 'rotate(-90deg)' }}>
+                    <circle cx="35" cy="35" r="28" fill="transparent" stroke="var(--border)" strokeWidth="5" />
+                    <circle 
+                      cx="35" 
+                      cy="35" 
+                      r="28" 
+                      fill="transparent" 
+                      stroke={percentage === 100 ? 'var(--success)' : 'var(--accent)'} 
+                      strokeWidth="5" 
+                      strokeDasharray={2 * Math.PI * 28} 
+                      strokeDashoffset={2 * Math.PI * 28 * (1 - percentage / 100)}
+                      strokeLinecap="round"
+                      style={{ transition: 'stroke-dashoffset 0.5s ease-out' }}
+                    />
+                  </svg>
+                  <span style={{ position: 'absolute', fontSize: '0.95rem', fontWeight: 700, color: percentage === 100 ? 'var(--success)' : 'var(--text)' }}>
+                    {percentage}%
+                  </span>
                 </div>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', margin: '0.25rem 0 0.75rem 0', minHeight: '2.5rem' }}>
-                  {lesson.description}
-                </p>
-                {isCompleted && bestAttempt ? (
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }} className="flex-col gap-0.5">
-                    <span style={{ color: 'var(--success)', fontWeight: 600 }}>Completed!</span>
-                    <span>Attempts: {attempts.length}</span>
-                    <span>Best: {bestAttempt.errorsCount} errors ({bestAttempt.durationSeconds}s)</span>
-                  </div>
-                ) : (
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Not completed yet</span>
-                )}
+
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  {completedCount} of {totalCount} completed
+                </span>
               </div>
             );
           })}
