@@ -230,13 +230,13 @@ p {
 }
 
 .shortcut-hint {
-  background-color: rgba(30, 41, 59, 0.4);
+  background-color: var(--border);
   padding: 0.15rem 0.45rem;
   border-radius: 0.25rem;
   font-family: var(--font-mono);
   font-size: 0.8rem;
   border: 1px solid var(--border);
-  color: var(--accent-hover);
+  color: var(--accent);
 }
 
 /* Card & Section Layouts */

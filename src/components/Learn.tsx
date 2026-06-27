@@ -167,10 +167,26 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
     }
   }, [isCompleted, startTime, errorsCount, activeLesson.id, finalStats]);
 
+  const charPointerRef = React.useRef(0);
+  const startTimeRef = React.useRef<number | null>(null);
+
+  // Sync state pointer with ref helper
+  useEffect(() => {
+    charPointerRef.current = charPointer;
+  }, [charPointer]);
+
+  useEffect(() => {
+    startTimeRef.current = startTime;
+  }, [startTime]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isCompleted) return;
+      if (charPointerRef.current >= targetText.length) return;
       if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+      if (e.key === ' ') {
+        e.preventDefault();
+      }
 
       // Smart Block: Ignore keys if error is present, must press Backspace
       if (hasError) {
@@ -184,18 +200,18 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
       setPressedKey(key === ' ' ? 'space' : key);
 
       // Start timer on first keystroke of the lesson
-      if (startTime === null) {
+      if (startTimeRef.current === null) {
         setStartTime(Date.now());
       }
 
       // Process lesson keystroke
-      const targetChar = currentTargetChar ? currentTargetChar.toLowerCase() : '';
+      const targetChar = targetText[charPointerRef.current];
       const pressed = e.key;
 
       if (pressed === ' ' && targetChar === ' ') {
         setCharPointer((prev) => prev + 1);
         setHasError(false);
-      } else if (pressed.toLowerCase() === targetChar && pressed !== ' ') {
+      } else if (pressed.toLowerCase() === (targetChar ? targetChar.toLowerCase() : '') && pressed !== ' ') {
         setCharPointer((prev) => prev + 1);
         setHasError(false);
       } else {
@@ -218,9 +234,10 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [charPointer, currentTargetChar, isCompleted, startTime, errorsCount, hasError]);
+  }, [targetText, hasError]);
 
   const handleRestart = () => {
+    charPointerRef.current = 0;
     setCharPointer(0);
     setHasError(false);
     setPressedKey(null);
@@ -234,6 +251,7 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
       const nextIdx = activeLessonIdx + 1;
       setActiveLessonIdx(nextIdx);
       setActivePhase(lessons[nextIdx].phase);
+      charPointerRef.current = 0;
       setCharPointer(0);
       setHasError(false);
       setPressedKey(null);
@@ -244,7 +262,12 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
   };
 
   const handleSelectLesson = (idx: number) => {
+    // Check lock boundary
+    const isUnlocked = idx === 0 || completedLessonIds.has(lessons[idx - 1].id);
+    if (!isUnlocked) return;
+
     setActiveLessonIdx(idx);
+    charPointerRef.current = 0;
     setCharPointer(0);
     setHasError(false);
     setPressedKey(null);
@@ -325,26 +348,32 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
   const filteredLessons = lessons.map((l, i) => ({ ...l, index: i })).filter(l => l.phase === activePhase);
 
   return (
-    <div className="flex-col gap-6" style={{ maxWidth: '950px', margin: '0 auto' }}>
+    <div className="flex-col gap-6" style={{ maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
       <style>{`
         @keyframes shake {
           0%, 100% { transform: translateX(0); }
           20%, 60% { transform: translateX(-4px); }
           40%, 80% { transform: translateX(4px); }
         }
+        @keyframes pop {
+          0% { transform: scale(1); }
+          50% { transform: scale(1.18); }
+          100% { transform: scale(1.05); }
+        }
         .shake-element {
           animation: shake 0.3s ease-in-out;
         }
         .phase-tab {
-          padding: 0.65rem 1.25rem;
+          padding: 0.5rem 1rem;
           font-weight: 600;
-          font-size: 0.9rem;
+          font-size: 0.85rem;
           border-radius: 0.375rem;
           border: 1px solid var(--border);
           background-color: var(--bg-card);
           color: var(--text-dim);
           cursor: pointer;
           transition: all 0.2s ease;
+          white-space: nowrap;
         }
         .phase-tab.active {
           background-color: var(--accent);
@@ -361,6 +390,14 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
           0% { filter: drop-shadow(0 0 2px rgba(14, 165, 233, 0.4)); }
           100% { filter: drop-shadow(0 0 10px rgba(14, 165, 233, 0.9)); }
         }
+        .stage-sidebar-container {
+          max-height: 520px;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+          padding-right: 0.25rem;
+        }
       `}</style>
 
       {/* Page Title */}
@@ -374,213 +411,189 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
         </span>
       </div>
 
-      {/* Phase Selectors */}
-      <div className="flex gap-2" style={{ overflowX: 'auto', paddingBottom: '0.5rem' }}>
-        {PHASES.map((phase) => (
-          <button
-            key={phase.code}
-            className={`phase-tab ${activePhase === phase.code ? 'active' : ''}`}
-            onClick={() => setActivePhase(phase.code)}
-          >
-            {phase.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Lesson Navigation Selector Cards */}
-      <div className="grid grid-cols-3" style={{ gap: '0.75rem', maxHeight: '200px', overflowY: 'auto', padding: '0.25rem', border: '1px solid var(--border)', borderRadius: '0.5rem', backgroundColor: 'rgba(9, 13, 22, 0.2)' }}>
-        {filteredLessons.map((lesson) => {
-          const isSelected = activeLessonIdx === lesson.index;
-          const isCompletedPast = completedLessonIds.has(lesson.id);
-          return (
-            <button
-              key={lesson.id}
-              className="card"
+      {/* Main Grid: Left is Tutor Screen, Right is Sidebar */}
+      <div className="grid grid-cols-12" style={{ gap: '1.5rem', alignItems: 'start' }}>
+        
+        {/* Left Side: interactive typing screen (8 columns) */}
+        <div className="col-span-8 flex-col gap-6">
+          {isCompleted && finalStats ? (
+            /* SUCCESS COMPLETION PANEL */
+            <div 
+              className="card flex-col flex-center"
               style={{
-                padding: '0.75rem 1rem',
-                cursor: 'pointer',
-                border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border)',
-                backgroundColor: isSelected ? 'rgba(14, 165, 233, 0.05)' : 'var(--bg-card)',
-                textAlign: 'left',
-                outline: 'none',
-                transition: 'all 0.2s ease',
+                padding: '3rem 2rem',
+                border: finalStats.graduated ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(244, 63, 94, 0.3)',
+                background: finalStats.graduated 
+                  ? 'linear-gradient(135deg, var(--bg-card) 0%, rgba(16, 185, 129, 0.04) 100%)' 
+                  : 'linear-gradient(135deg, var(--bg-card) 0%, rgba(244, 63, 94, 0.04) 100%)',
+                textAlign: 'center',
+                gap: '1.5rem',
+                animation: 'fadeIn 0.3s ease'
+              }}
+            >
+              <div style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                backgroundColor: finalStats.graduated ? 'rgba(16, 185, 129, 0.1)' : 'rgba(244, 63, 94, 0.1)',
+                color: finalStats.graduated ? 'var(--success)' : 'var(--danger)',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '0.5rem'
-              }}
-              onClick={() => handleSelectLesson(lesson.index)}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: '0.7rem', color: isSelected ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 600 }}>
-                  Stage {lesson.id}
-                </span>
-                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text)' }}>
-                  {lesson.title.replace(/Stage \d+:\s*/, '')}
-                </span>
+                justifyContent: 'center'
+              }}>
+                {finalStats.graduated ? <Award size={36} /> : <XCircle size={36} />}
               </div>
-              {isCompletedPast && (
-                <CheckCircle size={16} style={{ color: 'var(--success)', flexShrink: 0 }} />
-              )}
-            </button>
-          );
-        })}
-      </div>
 
-      {isCompleted && finalStats ? (
-        /* SUCCESS COMPLETION PANEL */
-        <div 
-          className="card flex-col flex-center"
-          style={{
-            padding: '3rem 2rem',
-            border: finalStats.graduated ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(244, 63, 94, 0.3)',
-            background: finalStats.graduated 
-              ? 'linear-gradient(135deg, var(--bg-card) 0%, rgba(16, 185, 129, 0.04) 100%)' 
-              : 'linear-gradient(135deg, var(--bg-card) 0%, rgba(244, 63, 94, 0.04) 100%)',
-            textAlign: 'center',
-            gap: '1.5rem',
-            animation: 'fadeIn 0.3s ease'
-          }}
-        >
-          <div style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '50%',
-            backgroundColor: finalStats.graduated ? 'rgba(16, 185, 129, 0.1)' : 'rgba(244, 63, 94, 0.1)',
-            color: finalStats.graduated ? 'var(--success)' : 'var(--danger)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
-            {finalStats.graduated ? <Award size={36} /> : <XCircle size={36} />}
-          </div>
+              <div className="flex-col gap-1">
+                <h3 style={{ fontSize: '1.5rem', fontWeight: 700 }}>
+                  {finalStats.graduated ? "Graduated Stage Successfully!" : "Graduation Stance Failed"}
+                </h3>
+                <p style={{ color: 'var(--text-dim)', maxWidth: '520px', margin: '0 auto', fontSize: '0.95rem' }}>
+                  {finalStats.graduated 
+                    ? `Sensational! You cleared the QWERTY thresholds for Stage ${activeLesson.id}. You can now unlock the next stage.`
+                    : `You finished the typing buffer, but failed to meet graduation thresholds. You must achieve at least 25 WPM and 98% Accuracy.`}
+                </p>
+              </div>
 
-          <div className="flex-col gap-1">
-            <h3 style={{ fontSize: '1.5rem', fontWeight: 700 }}>
-              {finalStats.graduated ? "Graduated Stage Successfully!" : "Graduation Stance Failed"}
-            </h3>
-            <p style={{ color: 'var(--text-dim)', maxWidth: '520px', margin: '0 auto', fontSize: '0.95rem' }}>
-              {finalStats.graduated 
-                ? `Sensational! You cleared the QWERTY thresholds for Stage ${activeLesson.id}. You can now unlock the next stage.`
-                : `You finished the typing buffer, but failed to meet graduation thresholds. You must achieve at least 25 WPM and 98% Accuracy.`}
-            </p>
-          </div>
+              {/* Metrics Displays */}
+              <div className="flex gap-6" style={{ justifyContent: 'center', width: '100%', margin: '1rem 0' }}>
+                <div className="card flex-col flex-center" style={{ padding: '1rem', minWidth: '130px' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Your Speed</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 700, color: finalStats.wpm >= 25 ? 'var(--success)' : 'var(--danger)' }}>
+                    {finalStats.wpm} <span style={{ fontSize: '0.85rem' }}>WPM</span>
+                  </span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Target: &ge; 25 WPM</span>
+                </div>
+                
+                <div className="card flex-col flex-center" style={{ padding: '1rem', minWidth: '130px' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Your Accuracy</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 700, color: finalStats.accuracy >= 98 ? 'var(--success)' : 'var(--danger)' }}>
+                    {finalStats.accuracy}%
+                  </span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Target: &ge; 98%</span>
+                </div>
 
-          {/* Metrics Displays */}
-          <div className="flex gap-6" style={{ justifyContent: 'center', width: '100%', margin: '1rem 0' }}>
-            <div className="card flex-col flex-center" style={{ padding: '1rem', minWidth: '130px' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Your Speed</span>
-              <span style={{ fontSize: '1.75rem', fontWeight: 700, color: finalStats.wpm >= 25 ? 'var(--success)' : 'var(--danger)' }}>
-                {finalStats.wpm} <span style={{ fontSize: '0.85rem' }}>WPM</span>
-              </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Target: &ge; 25 WPM</span>
-            </div>
-            
-            <div className="card flex-col flex-center" style={{ padding: '1rem', minWidth: '130px' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Your Accuracy</span>
-              <span style={{ fontSize: '1.75rem', fontWeight: 700, color: finalStats.accuracy >= 98 ? 'var(--success)' : 'var(--danger)' }}>
-                {finalStats.accuracy}%
-              </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Target: &ge; 98%</span>
-            </div>
+                <div className="card flex-col flex-center" style={{ padding: '1rem', minWidth: '130px' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Time Taken</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--text)' }}>
+                    {finalStats.duration}s
+                  </span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Errors: {errorsCount}</span>
+                </div>
+              </div>
 
-            <div className="card flex-col flex-center" style={{ padding: '1rem', minWidth: '130px' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Time Taken</span>
-              <span style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--text)' }}>
-                {finalStats.duration}s
-              </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Errors: {errorsCount}</span>
-            </div>
-          </div>
-
-          <div className="flex gap-4">
-            <button className="btn btn-secondary" onClick={handleRestart}>
-              <RotateCcw size={16} />
-              Repeat Lesson
-            </button>
-            
-            {finalStats.graduated ? (
-              activeLessonIdx < lessons.length - 1 ? (
-                <button className="btn btn-primary" onClick={handleNextLesson}>
-                  Next Lesson
-                  <ArrowRight size={16} />
+              <div className="flex gap-4">
+                <button className="btn btn-secondary" onClick={handleRestart}>
+                  <RotateCcw size={16} />
+                  Repeat Lesson
                 </button>
-              ) : (
-                <button className="btn btn-primary" onClick={() => onNavigate('test')}>
-                  Take A Typing Test
-                  <Keyboard size={16} />
-                </button>
-              )
-            ) : (
-              <button className="btn btn-primary" disabled style={{ opacity: 0.4, cursor: 'not-allowed' }}>
-                Next Lesson (Locked)
-                <ArrowRight size={16} />
-              </button>
-            )}
-          </div>
-        </div>
-      ) : (
-        /* INTERACTIVE TUTOR SHELL */
-        <>
-          {/* Active Lesson Prompt */}
-          <div className="card flex-col" style={{ gap: '0.5rem' }}>
-            <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>
-                {activeLesson.description}
-              </span>
-              {hasError && (
-                <span className="flex" style={{ color: 'var(--danger)', fontSize: '0.85rem', fontWeight: 600, alignItems: 'center', gap: '0.25rem' }}>
-                  <XCircle size={14} /> Please press Backspace to clear error
-                </span>
-              )}
+                
+                {finalStats.graduated ? (
+                  activeLessonIdx < lessons.length - 1 ? (
+                    <button className="btn btn-primary" onClick={handleNextLesson}>
+                      Next Lesson
+                      <ArrowRight size={16} />
+                    </button>
+                  ) : (
+                    <button className="btn btn-primary" onClick={() => onNavigate('test')}>
+                      Take A Typing Test
+                      <Keyboard size={16} />
+                    </button>
+                  )
+                ) : (
+                  <button className="btn btn-primary" disabled style={{ opacity: 0.4, cursor: 'not-allowed' }}>
+                    Next Lesson (Locked)
+                    <ArrowRight size={16} />
+                  </button>
+                )}
+              </div>
             </div>
-            
-            {/* Typing buffer screen */}
-            <div 
-              className={`shake-container ${hasError ? 'shake-element' : ''}`}
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '1.55rem',
-                lineHeight: '2.5rem',
-                letterSpacing: '0.05em',
-                padding: '1.25rem',
-                backgroundColor: 'rgba(9, 13, 22, 0.4)',
-                border: hasError ? '1px solid var(--danger)' : '1px solid var(--border)',
-                borderRadius: '0.5rem',
-                marginTop: '0.5rem',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-all',
-                transition: 'border 0.2s ease'
-              }}
-            >
-              {/* Correctly typed */}
-              <span style={{ color: 'var(--text-muted)', opacity: 0.6 }}>
-                {targetText.slice(0, charPointer)}
-              </span>
+          ) : (
+            /* ACTIVE LESSON TYPING SCREEN */
+            <div className="flex-col gap-6">
+              {/* Active Lesson Prompt */}
+              <div className="card flex-col" style={{ gap: '0.5rem' }}>
+                <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                    {activeLesson.description}
+                  </span>
+                  {hasError && (
+                    <span className="flex" style={{ color: 'var(--danger)', fontSize: '0.85rem', fontWeight: 600, alignItems: 'center', gap: '0.25rem' }}>
+                      <XCircle size={14} /> Please press Backspace to clear error
+                    </span>
+                  )}
+                </div>
+                
+                  {/* Typing buffer screen rendered as individual box grid (EdClub style) */}
+                  <div 
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '0.4rem',
+                      marginTop: '0.5rem',
+                      padding: '0.25rem'
+                    }}
+                  >
+                    {targetText.split('').map((char, index) => {
+                      const isCorrect = index < charPointer;
+                      const isActive = index === charPointer;
+                      const isErrorActive = isActive && hasError;
 
-              {/* Active character character */}
-              <span 
-                style={{ 
-                  color: hasError ? '#ffffff' : 'var(--bg)', 
-                  backgroundColor: hasError ? 'var(--danger)' : 'var(--accent)',
-                  borderRadius: '2px',
-                  padding: '0 2.5px',
-                  boxShadow: hasError ? '0 0 10px var(--danger)' : '0 0 8px var(--accent)',
-                  position: 'relative'
-                }}
-              >
-                {currentTargetChar === ' ' ? '\u2423' : currentTargetChar}
-              </span>
+                      let boxBg = 'var(--bg-card)';
+                      let boxBorder = 'var(--border)';
+                      let boxColor = 'var(--text-dim)';
+                      let boxScale = '1';
+                      let animationName = 'none';
 
-              {/* Untyped characters */}
-              <span style={{ color: 'var(--text-dim)' }}>
-                {targetText.slice(charPointer + 1)}
-              </span>
-            </div>
-          </div>
+                      if (isCorrect) {
+                        boxBg = 'rgba(16, 185, 129, 0.15)';
+                        boxBorder = 'var(--success)';
+                        boxColor = 'var(--success)';
+                        boxScale = '1.05';
+                        animationName = 'pop 0.2s ease-out';
+                      } else if (isErrorActive) {
+                        boxBg = 'rgba(244, 63, 94, 0.2)';
+                        boxBorder = 'var(--danger)';
+                        boxColor = '#ffffff';
+                        boxScale = '0.95';
+                        animationName = 'shake 0.2s ease-in-out';
+                      } else if (isActive) {
+                        boxBg = 'rgba(14, 165, 233, 0.1)';
+                        boxBorder = 'var(--accent)';
+                        boxColor = 'var(--accent)';
+                      }
 
-          {/* Virtual Hands and Keyboard Overlay */}
-          <div className="grid grid-cols-12" style={{ gap: '1.5rem' }}>
+                      return (
+                        <div
+                          key={index}
+                          style={{
+                            width: '32px',
+                            height: '36px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: '0.25rem',
+                            border: `1px solid ${boxBorder}`,
+                            backgroundColor: boxBg,
+                            color: boxColor,
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '1.25rem',
+                            fontWeight: 700,
+                            transform: `scale(${boxScale})`,
+                            transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+                            animation: animationName,
+                            boxShadow: isActive ? '0 0 8px var(--accent-glow)' : 'none'
+                          }}
+                        >
+                          {char === ' ' ? '\u2423' : char}
+                        </div>
+                      );
+                    })}
+                  </div>
+              </div>
+
+              {/* Virtual Hands and Keyboard Overlay */}
+              <div className="grid grid-cols-12" style={{ gap: '1.5rem' }}>
             
             {/* Keyboard guide column (7 cols) */}
             <div className="card flex-col flex-center col-span-8" style={{ gap: '0.75rem', padding: '1.5rem' }}>
@@ -764,8 +777,80 @@ export const Learn: React.FC<LearnProps> = ({ onNavigate }) => {
             </div>
 
           </div>
-        </>
-      )}
+        </div>
+        )}
+        </div>
+
+        {/* Right Side: Sidebar Navigation panel (4 columns) */}
+        <div className="col-span-4 card flex-col" style={{ gap: '1rem', padding: '1.25rem', height: 'fit-content' }}>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+            <span>Curriculum Path</span>
+          </h3>
+
+          {/* Phase Selectors */}
+          <div className="flex gap-1" style={{ flexWrap: 'wrap', paddingBottom: '0.25rem', borderBottom: '1px solid var(--border)' }}>
+            {PHASES.map((phase) => (
+              <button
+                key={phase.code}
+                className={`phase-tab ${activePhase === phase.code ? 'active' : ''}`}
+                onClick={() => setActivePhase(phase.code)}
+                style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+              >
+                {phase.label.replace(' & Symbols', '')}
+              </button>
+            ))}
+          </div>
+
+          {/* Lesson Navigation Selector Cards */}
+          <div className="stage-sidebar-container">
+            {filteredLessons.map((lesson) => {
+              const isSelected = activeLessonIdx === lesson.index;
+              const isCompletedPast = completedLessonIds.has(lesson.id);
+              const isUnlocked = lesson.index === 0 || completedLessonIds.has(lessons[lesson.index - 1].id);
+              
+              return (
+                <button
+                  key={lesson.id}
+                  disabled={!isUnlocked}
+                  style={{
+                    padding: '0.6rem 0.85rem',
+                    cursor: isUnlocked ? 'pointer' : 'not-allowed',
+                    border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    backgroundColor: isSelected ? 'rgba(14, 165, 233, 0.05)' : isUnlocked ? 'var(--bg-card)' : 'rgba(15, 23, 42, 0.4)',
+                    borderRadius: '0.375rem',
+                    textAlign: 'left',
+                    outline: 'none',
+                    transition: 'all 0.2s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.5rem',
+                    width: '100%',
+                    opacity: isUnlocked ? 1 : 0.5
+                  }}
+                  onClick={() => handleSelectLesson(lesson.index)}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span style={{ fontSize: '0.65rem', color: isSelected ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 600 }}>
+                      Stage {lesson.id}
+                    </span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>
+                      {lesson.title.replace(/Stage \d+:\s*/, '')}
+                    </span>
+                  </div>
+                  {isCompletedPast && isUnlocked && (
+                    <CheckCircle size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
+                  )}
+                  {!isUnlocked && (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>🔒</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 };

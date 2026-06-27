@@ -8,6 +8,7 @@ import { Practice } from './components/Practice';
 import { ProgressView } from './components/ProgressView';
 import { About } from './components/About';
 import { Learn } from './components/Learn';
+import { Auth } from './components/Auth';
 import './App.css';
 import type { TypingTestSession } from './services/db';
 
@@ -89,8 +90,9 @@ function App() {
       root.style.setProperty('--border', '#e2e8f0');
       root.style.setProperty('--text', '#0f172a');
       root.style.setProperty('--text-dim', '#475569');
-      root.style.setProperty('--text-muted', '#94a3b8');
+      root.style.setProperty('--text-muted', '#64748b');
       root.style.setProperty('--bg-hover', '#f1f5f9');
+      root.style.setProperty('--accent', '#0284c7');
     } else if (theme === 'sepia') {
       root.classList.add('theme-sepia');
       root.style.setProperty('--bg', '#f4ecd8');
@@ -100,6 +102,7 @@ function App() {
       root.style.setProperty('--text-dim', '#5f4b32');
       root.style.setProperty('--text-muted', '#8c765c');
       root.style.setProperty('--bg-hover', '#eae0c8');
+      root.style.setProperty('--accent', '#a16207');
     } else {
       root.classList.add('theme-dark');
       root.style.setProperty('--bg', '#0b0f19');
@@ -109,6 +112,7 @@ function App() {
       root.style.setProperty('--text-dim', '#94a3b8');
       root.style.setProperty('--text-muted', '#64748b');
       root.style.setProperty('--bg-hover', '#1e2640');
+      root.style.setProperty('--accent', '#0ea5e9');
     }
   }, [theme]);
 
@@ -207,6 +211,9 @@ function App() {
         </nav>
 
         <div className="header-settings">
+          {/* Optional User Nickname Auth Profile */}
+          <Auth />
+
           {/* Sound Toggle */}
           <button 
             className="icon-btn" 
