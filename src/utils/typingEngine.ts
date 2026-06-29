@@ -27,12 +27,32 @@ export class TypingEngine {
   public keystrokeLog: KeystrokeEvent[] = [];
   private lastKeystrokeTime: number | null = null;
 
-  // Stores the actual typed characters for each word
+  public wpmTimeline: number[] = [];
+  private snapshotIntervalId: any = null;
   public typedWords: string[] = [];
 
   constructor(wordList: string[]) {
     this.wordList = wordList;
     this.typedWords = Array(wordList.length).fill('');
+  }
+
+  public startSnapshotTimeline(): void {
+    if (this.snapshotIntervalId) return;
+    this.snapshotIntervalId = setInterval(() => {
+      if (this.startTime === null) return;
+      const elapsed = (Date.now() - this.startTime) / 1000;
+      if (elapsed > 0) {
+        const currentWpm = Math.round(this.getNetWPM(elapsed));
+        this.wpmTimeline.push(currentWpm);
+      }
+    }, 1000);
+  }
+
+  public stopSnapshotTimeline(): void {
+    if (this.snapshotIntervalId) {
+      clearInterval(this.snapshotIntervalId);
+      this.snapshotIntervalId = null;
+    }
   }
 
   /**
@@ -45,6 +65,7 @@ export class TypingEngine {
     if (this.startTime === null) {
       this.startTime = timestamp;
       this.lastKeystrokeTime = timestamp;
+      this.startSnapshotTimeline();
     }
 
     const currentWord = this.wordList[this.currentWordIndex];
@@ -117,6 +138,18 @@ export class TypingEngine {
     if (this.currentWordIndex >= this.wordList.length) return;
     if (this.currentCharIndex === 0) return; // Cannot backspace past start of current word
 
+    // Record Backspace as a keystroke event
+    const deltaMs = this.lastKeystrokeTime !== null ? timestamp - this.lastKeystrokeTime : 0;
+    this.keystrokeLog.push({
+      key: 'backspace',
+      target: 'backspace',
+      wordIndex: this.currentWordIndex,
+      charIndex: this.currentCharIndex,
+      timestamp,
+      deltaMs,
+      status: 'correct'
+    });
+
     this.currentCharIndex -= 1;
     this.typedWords[this.currentWordIndex] = this.typedWords[this.currentWordIndex].slice(0, -1);
     this.totalKeystrokes += 1; // Backspace counts as a keystroke
@@ -185,3 +218,4 @@ export class TypingEngine {
     return missed;
   }
 }
+

@@ -10,10 +10,13 @@ export function computeKeyAccuracyHeatmap(
 ): Record<string, { total: number; accuracy: number }> {
   const tempCounts: Record<string, { total: number; correct: number }> = {};
 
-  // Initialize the dictionary for all lowercase alphabetical keys a-z
-  for (let i = 97; i <= 122; i++) {
-    const char = String.fromCharCode(i);
-    tempCounts[char] = { total: 0, correct: 0 };
+  const targetKeys = [
+    ...'abcdefghijklmnopqrstuvwxyz1234567890-=[]\\;\',./'.split(''),
+    ' ', 'backspace'
+  ];
+
+  for (const key of targetKeys) {
+    tempCounts[key] = { total: 0, correct: 0 };
   }
 
   // Aggregate keystroke metrics from all session logs
@@ -21,12 +24,11 @@ export function computeKeyAccuracyHeatmap(
     if (!session.keystrokeLog) continue;
     for (const event of session.keystrokeLog) {
       if (!event.target) continue;
-      const char = event.target.toLowerCase();
-      // Only process standard alphabetical characters (a-z)
-      if (char >= 'a' && char <= 'z' && char.length === 1) {
-        tempCounts[char].total++;
+      const key = event.target.toLowerCase();
+      if (tempCounts[key] !== undefined) {
+        tempCounts[key].total++;
         if (event.status === 'correct') {
-          tempCounts[char].correct++;
+          tempCounts[key].correct++;
         }
       }
     }
@@ -34,10 +36,9 @@ export function computeKeyAccuracyHeatmap(
 
   // Calculate the accuracy percentage for each key
   const heatmap: Record<string, { total: number; accuracy: number }> = {};
-  for (let i = 97; i <= 122; i++) {
-    const char = String.fromCharCode(i);
-    const { total, correct } = tempCounts[char];
-    heatmap[char] = {
+  for (const key of targetKeys) {
+    const { total, correct } = tempCounts[key];
+    heatmap[key] = {
       total,
       accuracy: total > 0 ? (correct / total) * 100 : 0
     };
@@ -57,3 +58,73 @@ export function getBestWpmPerDuration(bests: PersonalBest[]): Record<number, num
   }
   return lookup;
 }
+
+/**
+ * Calculates consistency index based on keystroke timeline intervals (coefficient of variation).
+ */
+export function computeConsistencyScore(timeline: number[]): number {
+  if (timeline.length < 2) return 100;
+  const mean = timeline.reduce((a, b) => a + b, 0) / timeline.length;
+  if (mean === 0) return 100;
+  const variance = timeline.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / timeline.length;
+  const stdDev = Math.sqrt(variance);
+  const cv = stdDev / mean;
+  
+  // Consistency is inverse of CV, clamped to [0, 100]%
+  const score = Math.max(0, Math.min(100, Math.round((1 - cv) * 100)));
+  return isNaN(score) ? 100 : score;
+}
+
+/**
+ * Calculates latency intervals between adjacent key presses.
+ */
+export function computeBigramLatencyMap(sessions: TypingTestSession[]): Record<string, number> {
+  const latencies: Record<string, { totalMs: number; count: number }> = {};
+  
+  for (const session of sessions) {
+    if (!session.keystrokeLog) continue;
+    for (let i = 1; i < session.keystrokeLog.length; i++) {
+      const prev = session.keystrokeLog[i - 1].target.toLowerCase();
+      const curr = session.keystrokeLog[i].target.toLowerCase();
+      if (!prev || !curr) continue;
+      
+      const bigram = `${prev}${curr}`;
+      const delta = session.keystrokeLog[i].deltaMs || 0;
+      if (delta <= 0 || delta > 3000) continue; // ignore pauses
+      
+      if (!latencies[bigram]) {
+        latencies[bigram] = { totalMs: 0, count: 0 };
+      }
+      latencies[bigram].totalMs += delta;
+      latencies[bigram].count += 1;
+    }
+  }
+
+  const result: Record<string, number> = {};
+  for (const [bigram, data] of Object.entries(latencies)) {
+    result[bigram] = Math.round(data.totalMs / data.count);
+  }
+  return result;
+}
+
+/**
+ * Computes percentage improvement rate between oldest and newest sessions.
+ */
+export function computeImprovementRate(sessions: TypingTestSession[]): number {
+  if (sessions.length < 2) return 0;
+  const sorted = [...sessions].sort((a, b) => a.timestamp - b.timestamp);
+  const oldestWpm = sorted[0].wpm;
+  const newestWpm = sorted[sorted.length - 1].wpm;
+  if (oldestWpm === 0) return 0;
+  return Math.round(((newestWpm - oldestWpm) / oldestWpm) * 100);
+}
+
+/**
+ * Computes average duration (seconds) of typing test sessions.
+ */
+export function computeAverageSessionDuration(sessions: TypingTestSession[]): number {
+  if (sessions.length === 0) return 0;
+  const total = sessions.reduce((acc, s) => acc + s.duration, 0);
+  return Math.round(total / sessions.length);
+}
+

@@ -33,6 +33,7 @@ export const TypingTest: React.FC<TypingTestProps> = ({ onTestComplete }) => {
   const [duration, setDuration] = useState<15 | 30 | 60>(60);
   const [timeLeft, setTimeLeft] = useState<number>(60);
   const [timerStarted, setTimerStarted] = useState<boolean>(false);
+  const isTestActive = timerStarted && timeLeft > 0;
   const [isFocused, setIsFocused] = useState<boolean>(true);
   const [isMobile, setIsMobile] = useState<boolean>(false);
 
@@ -112,9 +113,12 @@ export const TypingTest: React.FC<TypingTestProps> = ({ onTestComplete }) => {
     const engine = engineRef.current;
     if (!engine) return;
 
-    if (engine.endTime === null) {
-      engine.endTime = Date.now();
-    }
+    engine.stopSnapshotTimeline();
+
+    // Compute consistency index based on latency deltas
+    const { computeConsistencyScore } = await import('../services/analytics');
+    const deltas = engine.keystrokeLog.map(k => k.deltaMs).filter(d => d > 0);
+    const finalConsistency = computeConsistencyScore(deltas);
 
     const sessionData: Omit<TypingTestSession, 'id'> = {
       timestamp: Date.now(),
@@ -126,6 +130,8 @@ export const TypingTest: React.FC<TypingTestProps> = ({ onTestComplete }) => {
       wordsCount: engine.currentWordIndex + 1,
       keystrokeLog: engine.keystrokeLog,
       missedWords: engine.getMissedWords(),
+      wpmTimeline: engine.wpmTimeline,
+      consistencyScore: finalConsistency
     };
 
     try {
@@ -179,7 +185,9 @@ export const TypingTest: React.FC<TypingTestProps> = ({ onTestComplete }) => {
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Tab') {
-        e.preventDefault();
+        if (isTestActive) {
+          e.preventDefault();
+        }
         tabPressedRef.current = true;
         return;
       }
@@ -204,7 +212,7 @@ export const TypingTest: React.FC<TypingTestProps> = ({ onTestComplete }) => {
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyDown);
     };
-  }, [duration]);
+  }, [duration, isTestActive]);
 
   // Capture input keydown handler
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

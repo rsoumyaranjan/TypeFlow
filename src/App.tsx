@@ -12,10 +12,14 @@ import { Auth } from './components/Auth';
 import { Curriculum } from './components/Curriculum';
 import { Login } from './components/Login';
 import { SettingsMenu } from './components/SettingsMenu';
+import { Onboarding } from './components/Onboarding';
+import { db } from './services/db';
+import { pullCloudToLocal } from './services/sync';
 import './App.css';
 import type { TypingTestSession } from './services/db';
+import type { LessonTrack } from './utils/lessonsData';
 
-type Page = 'dashboard' | 'test' | 'results' | 'practice' | 'progress' | 'about' | 'learn';
+type Page = 'dashboard' | 'test' | 'results' | 'practice' | 'progress' | 'about' | 'learn' | 'onboarding';
 
 function App() {
   const navigate = useNavigate();
@@ -26,6 +30,32 @@ function App() {
   const [lastSession, setLastSession] = useState<Omit<TypingTestSession, 'id'> | null>(null);
   const [practiceWords, setPracticeWords] = useState<string[]>([]);
   const [activeStageIdx, setActiveStageIdx] = useState<number>(0);
+  const [selectedTrack, setSelectedTrack] = useState<LessonTrack | null>(null);
+
+  // Sync data on mount and listen to user login state changes
+  useEffect(() => {
+    pullCloudToLocal();
+
+    const handleStorageChange = () => {
+      pullCloudToLocal();
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
+
+  // Check track on mount
+  useEffect(() => {
+    db.userStats.get('current_user').then(stats => {
+      if (stats && stats.selectedTrack) {
+        setSelectedTrack(stats.selectedTrack);
+      } else if (location.pathname !== '/onboarding') {
+        navigate('/onboarding');
+      }
+    });
+  }, [navigate, location.pathname]);
+
 
   // Map react-router paths to highlight header nav tabs
   const getActiveTab = (): Page => {
@@ -36,6 +66,7 @@ function App() {
     if (path === '/learn' || path === '/curriculum' || path.startsWith('/stage/')) return 'learn';
     if (path === '/progress') return 'progress';
     if (path === '/about') return 'about';
+    if (path === '/onboarding') return 'onboarding';
     return 'dashboard';
   };
 
@@ -136,8 +167,8 @@ function App() {
       title = "Practice Drills — Targeted Muscle Memory | TypeFlow";
       description = "Build typing speed and accuracy by practicing targeted drills on words you struggled with during typing tests.";
     } else if (path === '/curriculum') {
-      title = "Touch Typing Curriculum — 500 Chapters | TypeFlow";
-      description = "Study typing lessons systematically through a 500-stage typing curriculum.";
+      title = "Touch Typing Curriculum — 200 Stages | TypeFlow";
+      description = "Study typing lessons systematically through a 200-stage typing curriculum.";
     } else if (path.startsWith('/stage/')) {
       title = "Touch Typing Academy Stage Practice | TypeFlow";
       description = "Focus on typing accuracy and speed during active curriculum stages.";
@@ -181,7 +212,7 @@ function App() {
             <span className="logo-text">TypeFlow</span>
           </button>
 
-          <nav className="app-nav">
+          <nav className="app-nav" aria-label="Main navigation">
             <button 
               className={`nav-tab ${activeTab === 'dashboard' ? 'active' : ''}`}
               onClick={() => navigate('/')}
@@ -243,6 +274,7 @@ function App() {
       {/* Main View Container */}
       <main className="main-content" style={{ paddingTop: isStagePage ? '1rem' : '2rem' }}>
         <Routes>
+          <Route path="/onboarding" element={<Onboarding onTrackSelected={(track) => setSelectedTrack(track)} />} />
           <Route path="/" element={
             <Dashboard 
               onNavigate={handleNavigate} 
@@ -284,6 +316,7 @@ function App() {
               stageIndex={activeStageIdx}
               onBackToCurriculum={() => navigate('/curriculum')}
               onNavigate={handleNavigate} 
+              track={selectedTrack || 'adult'}
             />
           } />
           <Route path="/progress" element={<ProgressView />} />

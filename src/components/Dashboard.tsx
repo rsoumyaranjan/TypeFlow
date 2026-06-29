@@ -1,7 +1,10 @@
+// src/components/Dashboard.tsx
+
 import React, { useState, useEffect } from 'react';
-import { Play, Trophy, Keyboard, Zap, Sparkles, AlertTriangle } from 'lucide-react';
-import { getTestHistory, getPersonalBests, type TypingTestSession, type PersonalBest } from '../services/db';
+import { Play, Trophy, Keyboard, Zap, Sparkles, AlertTriangle, Shield, Award, Calendar, Check } from 'lucide-react';
+import { getTestHistory, getPersonalBests, getBadges, getDailyChallengeCompletion, type TypingTestSession, type PersonalBest, type Badge, db } from '../services/db';
 import { computeKeyAccuracyHeatmap, getBestWpmPerDuration } from '../services/analytics';
+import { getTodaysChallenge } from '../utils/dailyChallenge';
 
 interface DashboardProps {
   onNavigate: (page: 'dashboard' | 'test' | 'results' | 'practice' | 'progress' | 'about' | 'learn') => void;
@@ -23,27 +26,52 @@ const PRACTICE_DICTIONARY = [
   "went", "light", "kind", "off", "need", "house", "picture", "try", "again", "animal", "point", "mother", "world", "near"
 ];
 
+const getLevelName = (level: number): string => {
+  if (level >= 30) return "TypeFlow Legend";
+  if (level >= 25) return "Code Slinger";
+  if (level >= 20) return "Symbol Sorcerer";
+  if (level >= 15) return "Speed Demon";
+  if (level >= 10) return "Type Warrior";
+  if (level >= 9) return "Word Machine";
+  if (level >= 8) return "Accuracy Sniper";
+  if (level >= 7) return "Speed Climber";
+  if (level >= 6) return "Rhythm Typer";
+  if (level >= 5) return "Touch Typer";
+  if (level >= 4) return "Home Row Student";
+  if (level >= 3) return "Hunt & Peck Graduate";
+  if (level >= 2) return "Two-Finger Typist";
+  return "Beginner";
+};
+
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onStartPractice }) => {
   const [sessions, setSessions] = useState<TypingTestSession[]>([]);
   const [bests, setBests] = useState<PersonalBest[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [touchTypeStatus, setTouchTypeStatus] = useState<'yes' | 'no' | 'unsure' | null>(null);
   const [onboardingAnswered, setOnboardingAnswered] = useState<boolean>(false);
-
   const [userStats, setUserStats] = useState<any>(null);
+  const [badges, setBadges] = useState<Badge[]>([]);
+  const [challengeCompleted, setChallengeCompleted] = useState<boolean>(false);
 
-  // Load database statistics on mount
+  const dailyChallenge = getTodaysChallenge();
+
   useEffect(() => {
     const loadDashboardData = async () => {
       try {
         setLoading(true);
-        const { db } = await import('../services/db');
         const stats = await db.userStats.get('current_user');
         setUserStats(stats);
         const history = await getTestHistory();
         const pbList = await getPersonalBests();
+        const earnedBadges = await getBadges();
         setSessions(history);
         setBests(pbList);
+        setBadges(earnedBadges);
+
+        if (stats) {
+          const comp = await getDailyChallengeCompletion(dailyChallenge.id);
+          setChallengeCompleted(!!comp);
+        }
 
         // Load onboarding status
         const savedStatus = localStorage.getItem('typeflow_touchtype_status');
@@ -68,6 +96,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onStartPractic
   // Compute overall best accuracy
   const maxAcc = sessions.length > 0 ? Math.max(...sessions.map((s) => s.accuracy)) : 0;
 
+  // Compute average consistency score
+  const validSessions = sessions.filter(s => s.consistencyScore !== undefined);
+  const avgConsistency = validSessions.length > 0
+    ? Math.round(validSessions.reduce((acc, s) => acc + (s.consistencyScore || 0), 0) / validSessions.length)
+    : 0;
+
   // Identify Weak Key: lowest accuracy under 90% typed at least 3 times
   const keyStats = computeKeyAccuracyHeatmap(sessions);
   let weakKey: string | null = null;
@@ -85,6 +119,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onStartPractic
     const filtered = PRACTICE_DICTIONARY.filter((w) => w.toLowerCase().includes((weakKey as string).toLowerCase())).slice(0, 15);
     const drillWords = filtered.length > 0 ? filtered : ["practice", "keyboard", "typing"];
     onStartPractice(drillWords);
+  };
+
+  const handleStartChallenge = () => {
+    // Store daily challenge data in localStorage for Practice view to pick up
+    localStorage.setItem('typeflow_active_challenge', JSON.stringify(dailyChallenge));
+    onStartPractice(dailyChallenge.content.split(' '));
   };
 
   const handleSelectOnboarding = (status: 'yes' | 'no' | 'unsure') => {
@@ -111,19 +151,59 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onStartPractic
     );
   }
 
+  // XP level bounds computation
+  const currentLevel = userStats?.level || 1;
+  const currentXp = userStats?.xp || 0;
+  const lowerBound = Math.pow(currentLevel - 1, 2) * 100;
+  const upperBound = Math.pow(currentLevel, 2) * 100;
+  const levelProgress = currentXp - lowerBound;
+  const range = upperBound - lowerBound;
+  const progressPct = range > 0 ? Math.min(100, Math.max(0, (levelProgress / range) * 100)) : 0;
+
   return (
     <div className="dashboard-grid">
       {/* Left Column: Hero, Onboarding & Dynamic Recommendations */}
       <div className="flex-col gap-6">
-        {/* Welcome Hero (Compacted) */}
+        {/* Welcome Hero */}
         <div className="card" style={{ background: 'linear-gradient(135deg, #151b2d 0%, #0d213f 100%)', borderColor: 'rgba(14, 165, 233, 0.2)', padding: '1.25rem' }}>
-          <h2 className="dashboard-hero-title">
-            <Sparkles className="logo-icon" size={20} />
-            Welcome back to TypeFlow
-          </h2>
-          <p className="card-desc dashboard-hero-desc" style={{ margin: 0 }}>
+          <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 className="dashboard-hero-title" style={{ margin: 0 }}>
+              <Sparkles className="logo-icon" size={20} />
+              Welcome back to TypeFlow
+            </h2>
+            {userStats?.selectedTrack && (
+              <span style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem', borderRadius: '20px', background: 'var(--accent)', color: '#0b0f19', fontWeight: 'bold', textTransform: 'capitalize' }}>
+                Track: {userStats.selectedTrack}
+              </span>
+            )}
+          </div>
+          <p className="card-desc dashboard-hero-desc" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
             Your calm, local-first touch-typing companion. Analyze speed, target weak keys, and build fluid muscle memory.
           </p>
+        </div>
+
+        {/* Daily Challenge Widget */}
+        <div className="card" style={{ padding: '1.25rem', border: '1px solid var(--accent)' }}>
+          <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <h3 className="card-title" style={{ fontSize: '1.1rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <Calendar size={18} style={{ color: 'var(--accent)' }} />
+              Daily Challenge
+            </h3>
+            {challengeCompleted && (
+              <span style={{ color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.8rem', fontWeight: 'bold' }}>
+                <Check size={14} /> Completed
+              </span>
+            )}
+          </div>
+          <p style={{ fontWeight: 'bold', fontSize: '0.95rem', margin: '0 0 0.25rem 0' }}>{dailyChallenge.title}</p>
+          <p className="card-desc" style={{ fontSize: '0.85rem', margin: '0 0 1rem 0' }}>{dailyChallenge.description}</p>
+          {!challengeCompleted ? (
+            <button className="btn btn-primary" style={{ padding: '0.4rem 1rem', fontSize: '0.8rem' }} onClick={handleStartChallenge}>
+              Start Challenge (+{dailyChallenge.xpReward} XP)
+            </button>
+          ) : (
+            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>Come back tomorrow for another challenge!</p>
+          )}
         </div>
 
         {/* Onboarding Diagnostics Card */}
@@ -177,7 +257,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onStartPractic
               ) : (
                 <>
                   <p style={{ margin: 0 }}>
-                    To avoid developing bad muscle habits, we highly recommend mastering the home row finger positions first. Take a look at our quick visual placement drills.
+                    To avoid developing bad muscle habits, we highly recommend mastering the home row finger positions first. Take a look at our curriculum stages.
                   </p>
                   <button className="btn btn-primary" style={{ alignSelf: 'flex-start', padding: '0.5rem 1rem', fontSize: '0.85rem', backgroundColor: 'var(--success)', color: '#fff' }} onClick={() => onNavigate('learn')}>
                     <Sparkles size={14} />
@@ -232,17 +312,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onStartPractic
           
           <div className="flex-col gap-3">
             {/* XP and level stats */}
-            <div className="flex" style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
-              <span style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>Typing Level</span>
-              <strong style={{ fontSize: '1.1rem', color: 'var(--accent)' }}>
-                Level {userStats?.level || 1} ({userStats?.xp || 0} XP)
-              </strong>
+            <div className="flex-col" style={{ gap: '0.3rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
+              <div className="flex" style={{ justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>Level {currentLevel}: {getLevelName(currentLevel)}</span>
+                <strong style={{ fontSize: '0.95rem', color: 'var(--accent)' }}>
+                  {currentXp} / {upperBound} XP
+                </strong>
+              </div>
+              <div style={{ width: '100%', height: '8px', background: 'var(--bg)', borderRadius: '4px', overflow: 'hidden' }}>
+                <div style={{ width: `${progressPct}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s' }}></div>
+              </div>
             </div>
 
             {/* Streak metrics */}
             <div className="flex" style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
-              <span style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>Daily Streak 🔥</span>
-              <strong style={{ fontSize: '1.1rem', color: 'var(--warning)' }}>
+              <span style={{ color: 'var(--text-dim)', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                Daily Streak 🔥 
+                {userStats?.streakShieldAvailable && <span title="Streak Shield Available"><Shield size={14} style={{ color: 'var(--accent)' }} /></span>}
+              </span>
+              <strong style={{ fontSize: '1.1rem', color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                 {userStats?.currentStreak || 0} days (Best: {userStats?.longestStreak || 0})
               </strong>
             </div>
@@ -259,6 +347,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onStartPractic
                 {maxAcc > 0 ? `${Math.round(maxAcc)}%` : '--'}
               </strong>
             </div>
+            <div className="flex" style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
+              <span style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>Avg Consistency</span>
+              <strong style={{ fontSize: '1.1rem', color: 'var(--accent)' }}>
+                {avgConsistency > 0 ? `${avgConsistency}%` : '--'}
+              </strong>
+            </div>
             <div className="flex" style={{ justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>Weakest Key</span>
               <strong style={{ fontSize: '1.1rem', color: weakKey ? 'var(--danger)' : 'var(--text-muted)', textTransform: 'uppercase' }}>
@@ -266,6 +360,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onStartPractic
               </strong>
             </div>
           </div>
+        </div>
+
+        {/* Badges showcase */}
+        <div className="card" style={{ padding: '1.25rem' }}>
+          <h3 className="card-title" style={{ fontSize: '1.1rem', margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <Award size={18} style={{ color: 'var(--warning)' }} />
+            Earned Badges ({badges.length})
+          </h3>
+          {badges.length === 0 ? (
+            <p className="card-desc" style={{ margin: 0, fontSize: '0.85rem' }}>No badges unlocked yet. Keep practicing in Learn mode to unlock achievements!</p>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginTop: '0.75rem' }}>
+              {badges.slice(0, 6).map(badge => (
+                <div key={badge.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0.5rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)', textAlign: 'center' }}>
+                  <span style={{ fontSize: '1.5rem' }}>
+                    {badge.id === 'home-row-master' ? '🏠' :
+                     badge.id === 'top-row-master' ? '⬆️' :
+                     badge.id === 'full-alphabet' ? '🔤' :
+                     badge.id === 'shift-shifter' ? '⬆️' :
+                     badge.id === 'number-cruncher' ? '🔢' :
+                     badge.id === 'symbol-master' ? '#️⃣' :
+                     badge.id === 'sixty-wpm' ? '🚀' :
+                     badge.id === 'certified-typist' ? '📜' :
+                     badge.id === 'keyboard-ninja' ? '🥷' :
+                     badge.id === 'typeflow-graduate' ? '🎓' : '🏆'}
+                  </span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text)', fontWeight: 'bold', marginTop: '0.25rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>
+                    {badge.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Shortcuts Reference */}

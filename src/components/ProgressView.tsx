@@ -1,36 +1,40 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import React, { useState, useEffect, useRef } from 'react';
-import { BarChart2, Download, Trash2, ShieldAlert, Award, Upload } from 'lucide-react';
 import {
   getTestHistory,
-  getPersonalBests,
   exportDataJSON,
   importDataJSON,
   resetDatabase,
   getLessonHistory,
+  getBadges,
   type TypingTestSession,
-  type PersonalBest,
-  type LessonAttempt
+  type LessonAttempt,
+  type Badge
 } from '../services/db';
-import { computeKeyAccuracyHeatmap, getBestWpmPerDuration } from '../services/analytics';
+import {
+  computeKeyAccuracyHeatmap,
+  computeConsistencyScore,
+  computeImprovementRate,
+  computeAverageSessionDuration
+} from '../services/analytics';
 
 // Import the full curriculum lesson metadata structure from the utilities module
 import { lessons as LESSONS_LIST } from '../utils/lessonsData';
 
 export const ProgressView = () => {
   const [sessions, setSessions] = useState<TypingTestSession[]>([]);
-  const [bests, setBests] = useState<PersonalBest[]>([]);
   const [lessonsHistory, setLessonsHistory] = useState<LessonAttempt[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [consistency, setConsistency] = useState<number>(0);
+  const [improvementRate, setImprovementRate] = useState<number>(0);
+  const [avgDuration, setAvgDuration] = useState<number>(0);
+  const [badges, setBadges] = useState<Badge[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Keyboard layout rows for the heatmap visual
-  const keyboardRows = [
-    ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
-    ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';'],
-    ['z', 'x', 'c', 'v', 'b', 'n', 'm']
-  ];
+  const [activeUser, setActiveUser] = useState<string | null>(null);
+  const [showStreakModal, setShowStreakModal] = useState<boolean>(false);
+  const [weeklyActiveDays, setWeeklyActiveDays] = useState<boolean[]>(Array(7).fill(false));
 
   const [userStats, setUserStats] = useState<any>(null);
 
@@ -38,15 +42,42 @@ export const ProgressView = () => {
   const loadData = async () => {
     try {
       setLoading(true);
+      const savedUser = localStorage.getItem('typeflow_active_user');
+      setActiveUser(savedUser);
+
       const { db } = await import('../services/db');
       const stats = await db.userStats.get('current_user');
       setUserStats(stats);
+      
       const history = await getTestHistory();
-      const pbList = await getPersonalBests();
       const lessonHistory = await getLessonHistory();
+      const earnedBadges = await getBadges();
+
       setSessions(history);
-      setBests(pbList);
       setLessonsHistory(lessonHistory);
+      setBadges(earnedBadges);
+
+      // Evaluate active streak days for current week (Sun-Sat)
+      const days = Array(7).fill(false);
+      const now = new Date();
+      const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
+      startOfWeek.setHours(0,0,0,0);
+
+      // Check test histories for this week
+      history.forEach(session => {
+        const d = new Date(session.timestamp);
+        if (d >= startOfWeek) {
+          days[d.getDay()] = true;
+        }
+      });
+      // Check lesson histories for this week
+      lessonHistory.forEach(lesson => {
+        const d = new Date(lesson.completedAt);
+        if (d >= startOfWeek) {
+          days[d.getDay()] = true;
+        }
+      });
+      setWeeklyActiveDays(days);
     } catch (err) {
       console.error('Failed to load local data:', err);
     } finally {
@@ -60,7 +91,6 @@ export const ProgressView = () => {
 
   // Compute key statistics and lookup map for best WPMs
   const keyStats = computeKeyAccuracyHeatmap(sessions);
-  const bestWpmMap = getBestWpmPerDuration(bests);
 
   // Dynamic status mapping for keyboard layout keys
   const getKeyStatus = (char: string): 'good' | 'warn' | 'danger' | 'none' => {
@@ -151,13 +181,16 @@ export const ProgressView = () => {
     };
 
     reader.readAsText(file);
-    // Clear input so same file can be selected again
     e.target.value = '';
   };
 
-  // Prepare data for the history bar chart (last 10 tests in chronological order)
-  const chartSessions = sessions.slice(0, 10).reverse();
-  const maxWpm = chartSessions.length > 0 ? Math.max(...chartSessions.map((s) => s.wpm), 60) : 100;
+  useEffect(() => {
+    if (sessions.length > 0) {
+      setConsistency(computeConsistencyScore(sessions.flatMap(s => s.keystrokeLog || []).map(k => k.deltaMs).filter(d => d > 0)));
+      setImprovementRate(computeImprovementRate(sessions));
+      setAvgDuration(computeAverageSessionDuration(sessions));
+    }
+  }, [sessions]);
 
   if (loading) {
     return (
@@ -169,9 +202,16 @@ export const ProgressView = () => {
     );
   }
 
+  const keyboardRows = [
+    ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '='],
+    ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']'],
+    ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '\\'],
+    ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'],
+    [' ', 'backspace']
+  ];
+
   return (
-    <div className="flex-col gap-6">
-      {/* Hidden file input for backup imports */}
+    <div className="flex-col gap-4" style={{ paddingBottom: '2rem', width: '100%' }}>
       <input
         ref={fileInputRef}
         type="file"
@@ -180,180 +220,218 @@ export const ProgressView = () => {
         onChange={handleImportChange}
       />
 
-      {/* Page Header */}
-      <div className="flex" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
-        <div className="flex" style={{ alignItems: 'center', gap: '0.5rem' }}>
-          <BarChart2 size={24} style={{ color: 'var(--accent)' }} />
-          <h2>Progress &amp; Analytics</h2>
+      {showStreakModal && (
+        <div className="flex-center" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(11, 15, 25, 0.85)', zIndex: 1000, padding: '1rem' }}>
+          <div className="card flex-col" style={{ maxWidth: '400px', width: '100%', padding: '1.5rem', gap: '1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: '1.1rem', margin: 0 }}>🔥 Weekly Streak Activity</h3>
+              <button 
+                onClick={() => setShowStreakModal(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '1.1rem', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+            <p className="card-desc" style={{ fontSize: '0.8rem', margin: 0 }}>Days completed this calendar week:</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem' }}>
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, idx) => (
+                <div key={day} className="flex-col flex-center" style={{ gap: '0.35rem' }}>
+                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{day}</span>
+                  <div 
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      backgroundColor: weeklyActiveDays[idx] ? 'var(--warning)' : 'var(--bg-hover)',
+                      border: `1px solid ${weeklyActiveDays[idx] ? 'var(--warning)' : 'var(--border)'}`,
+                      color: weeklyActiveDays[idx] ? '#0b0f19' : 'var(--text-dim)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '0.8rem',
+                      fontWeight: 700
+                    }}
+                  >
+                    {weeklyActiveDays[idx] ? '✓' : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-        {userStats && (
-          <div style={{ display: 'flex', gap: '1rem', fontSize: '0.85rem' }}>
-            <span className="card" style={{ padding: '0.35rem 0.75rem', borderColor: 'var(--border)' }}>
-              🏆 Level <strong>{userStats.level}</strong> ({userStats.xp} XP)
-            </span>
-            <span className="card" style={{ padding: '0.35rem 0.75rem', borderColor: 'var(--border)', color: 'var(--warning)' }}>
-              🔥 <strong>{userStats.currentStreak}</strong> Day Streak
-            </span>
+      )}
+
+      {/* Hero Stats strip */}
+      <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', width: '100%' }}>
+        <div className="card flex-col flex-center" style={{ flex: 1, padding: '0.5rem 0.25rem', minHeight: '60px', background: 'linear-gradient(145deg, var(--bg-card), rgba(14, 165, 233, 0.05))', transition: 'transform 0.2s' }}>
+          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>XP LEVEL</span>
+          <strong style={{ fontSize: '1.05rem', color: 'var(--accent)', marginTop: '0.1rem' }}>
+            Lvl {userStats?.level || 1}
+          </strong>
+          <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)' }}>{userStats?.xp || 0} XP</span>
+        </div>
+
+        {activeUser && (
+          <div 
+            className="card flex-col flex-center" 
+            onClick={() => setShowStreakModal(true)}
+            style={{ flex: 1, padding: '0.5rem 0.25rem', minHeight: '60px', background: 'linear-gradient(145deg, var(--bg-card), rgba(245, 158, 11, 0.05))', transition: 'transform 0.2s', cursor: 'pointer', border: '1px solid rgba(245, 158, 11, 0.2)' }}
+            title="Click to view weekly streak calendar"
+          >
+            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>STREAK</span>
+            <strong style={{ fontSize: '1.05rem', color: 'var(--warning)', marginTop: '0.1rem' }}>
+              🔥 {userStats?.currentStreak || 1}
+            </strong>
+            <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)' }}>Best: {userStats?.longestStreak || 1}d</span>
           </div>
         )}
-      </div>
 
-      {/* High Scores Banner */}
-      <div className="grid grid-cols-3">
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.25rem' }}>
-          <div style={{ backgroundColor: 'rgba(14, 165, 233, 0.1)', padding: '0.75rem', borderRadius: '0.5rem', color: 'var(--accent)' }}>
-            <Award size={24} />
-          </div>
-          <div className="flex-col">
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>15s Record</span>
-            <span style={{ fontSize: '1.5rem', fontWeight: 700 }}>
-              {bestWpmMap[15] !== undefined ? `${Math.round(bestWpmMap[15])} WPM` : '-- WPM'}
-            </span>
-          </div>
+        <div className="card flex-col flex-center" style={{ flex: 1, padding: '0.5rem 0.25rem', minHeight: '60px', background: 'linear-gradient(145deg, var(--bg-card), rgba(16, 185, 129, 0.05))', transition: 'transform 0.2s' }}>
+          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>CONSISTENCY</span>
+          <strong style={{ fontSize: '1.05rem', color: 'var(--success)', marginTop: '0.1rem' }}>
+            {consistency}%
+          </strong>
+          <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)' }}>Pacing Index</span>
         </div>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.25rem' }}>
-          <div style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', padding: '0.75rem', borderRadius: '0.5rem', color: 'var(--success)' }}>
-            <Award size={24} />
-          </div>
-          <div className="flex-col">
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>30s Record</span>
-            <span style={{ fontSize: '1.5rem', fontWeight: 700 }}>
-              {bestWpmMap[30] !== undefined ? `${Math.round(bestWpmMap[30])} WPM` : '-- WPM'}
-            </span>
-          </div>
+
+        <div className="card flex-col flex-center" style={{ flex: 1, padding: '0.5rem 0.25rem', minHeight: '60px', background: 'linear-gradient(145deg, var(--bg-card), rgba(14, 165, 233, 0.05))', transition: 'transform 0.2s' }}>
+          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>IMPROVEMENT</span>
+          <strong style={{ fontSize: '1.05rem', color: 'var(--accent)', marginTop: '0.1rem' }}>
+            {improvementRate >= 0 ? `+${improvementRate}` : improvementRate}%
+          </strong>
+          <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)' }}>Speed Growth</span>
         </div>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.25rem' }}>
-          <div style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', padding: '0.75rem', borderRadius: '0.5rem', color: 'var(--warning)' }}>
-            <Award size={24} />
-          </div>
-          <div className="flex-col">
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>60s Record</span>
-            <span style={{ fontSize: '1.5rem', fontWeight: 700 }}>
-              {bestWpmMap[60] !== undefined ? `${Math.round(bestWpmMap[60])} WPM` : '-- WPM'}
-            </span>
-          </div>
+
+        <div className="card flex-col flex-center" style={{ flex: 1, padding: '0.5rem 0.25rem', minHeight: '60px', background: 'linear-gradient(145deg, var(--bg-card), rgba(248, 250, 252, 0.02))', transition: 'transform 0.2s' }}>
+          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>AVG SESSION</span>
+          <strong style={{ fontSize: '1.05rem', color: 'var(--text)', marginTop: '0.1rem' }}>
+            {avgDuration}s
+          </strong>
+          <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)' }}>Duration</span>
         </div>
       </div>
 
-      {/* Main Graph & Keyboard Grid */}
-      <div className="grid grid-cols-2">
-        {/* Performance Chart */}
-        <div className="card flex-col">
-          <h3 className="card-title">WPM History</h3>
-          <p className="card-desc">Your typing speed trends over the last 10 sessions.</p>
+      {/* SVG-based Sparkline Graph & Keyboard accuracy heatmap */}
+      <div className="grid grid-cols-2 gap-4">
+        {/* WPM Sparkline graph */}
+        <div className="card flex-col" style={{ padding: '1rem' }}>
+          <h3 className="card-title" style={{ fontSize: '1rem', margin: 0 }}>WPM Trend Sparkline</h3>
+          <p className="card-desc" style={{ fontSize: '0.75rem', marginBottom: '0.5rem' }}>chronological typing speed graph</p>
           
-          <div className="flex-col" style={{ flexGrow: 1, minHeight: '180px', padding: '1rem 0' }}>
-            {chartSessions.length === 0 ? (
-              <div className="flex-center" style={{ 
-                flexGrow: 1, 
-                border: '1px dashed var(--border)', 
-                borderRadius: '0.5rem',
-                color: 'var(--text-muted)',
-                backgroundColor: 'rgba(9, 13, 22, 0.3)',
-                fontSize: '0.9rem',
-                height: '100%'
-              }}>
-                No typing tests completed yet. Take a test to view progress trends!
-              </div>
+          <div className="flex-center" style={{ height: '110px', width: '100%', marginTop: '0.25rem' }}>
+            {sessions.length < 2 ? (
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Complete 2 or more tests to trace sparkline</span>
             ) : (
-              <div className="flex" style={{ height: '100%', alignItems: 'flex-end', justifyContent: 'space-between', gap: '0.5rem', paddingBottom: '0.5rem' }}>
-                {chartSessions.map((session, idx) => {
-                  const heightPct = (session.wpm / maxWpm) * 100;
+              <svg width="100%" height="90" style={{ overflow: 'visible' }}>
+                <defs>
+                  <linearGradient id="sparklineGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.4" />
+                    <stop offset="100%" stopColor="var(--accent)" stopOpacity="0.0" />
+                  </linearGradient>
+                </defs>
+                {(() => {
+                  const points = sessions.slice(0, 15).reverse();
+                  const minVal = Math.min(...points.map(p => p.wpm));
+                  const maxVal = Math.max(...points.map(p => p.wpm));
+                  const range = maxVal - minVal || 1;
+                  
+                  const width = 300;
+                  const step = width / (points.length - 1);
+                  const coords = points.map((p, i) => {
+                    const x = i * step;
+                    const y = 80 - ((p.wpm - minVal) / range) * 70;
+                    return { x, y, wpm: p.wpm };
+                  });
+
+                  const pathD = `M ${coords.map(c => `${c.x},${c.y}`).join(' L ')}`;
+                  const areaD = `${pathD} L ${coords[coords.length - 1].x},90 L 0,90 Z`;
+
                   return (
-                    <div key={session.id || idx} className="flex-col" style={{ flexGrow: 1, alignItems: 'center', height: '100%', justifyContent: 'flex-end' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent)', marginBottom: '0.25rem' }}>
-                        {Math.round(session.wpm)}
-                      </span>
-                      <div 
-                        style={{
-                          width: '100%',
-                          maxHeight: '100px',
-                          height: `${heightPct}%`,
-                          backgroundColor: 'rgba(14, 165, 233, 0.2)',
-                          border: '1px solid var(--accent)',
-                          borderRadius: '2px 2px 0 0',
-                          transition: 'height 0.3s ease'
-                        }}
-                        title={`WPM: ${Math.round(session.wpm)}, Acc: ${Math.round(session.accuracy)}% (${session.duration}s)`}
-                      />
-                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                        #{idx + 1}
-                      </span>
-                    </div>
+                    <>
+                      <path d={areaD} fill="url(#sparklineGrad)" />
+                      <path d={pathD} fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                      {coords.map((c, i) => (
+                        <circle
+                          key={i}
+                          cx={c.x}
+                          cy={c.y}
+                          r="3"
+                          fill="var(--accent)"
+                          stroke="var(--bg)"
+                          strokeWidth="1"
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <title>{Math.round(c.wpm)} WPM</title>
+                        </circle>
+                      ))}
+                    </>
                   );
-                })}
-              </div>
+                })()}
+              </svg>
             )}
           </div>
         </div>
 
         {/* Keyboard Heatmap Grid */}
-        <div className="card flex-col">
-          <h3 className="card-title">Key Accuracy Heatmap</h3>
-          <p className="card-desc">Identify which letters trigger the most typos or keystroke lag.</p>
+        <div className="card flex-col" style={{ padding: '1rem' }}>
+          <h3 className="card-title" style={{ fontSize: '1rem', margin: 0 }}>47-Key Accuracy Heatmap</h3>
+          <p className="card-desc" style={{ fontSize: '0.75rem', marginBottom: '0.5rem' }}>letters, numbers, space, and backspaces</p>
           
-          <div className="flex-col gap-2" style={{ marginTop: '0.5rem', alignItems: 'center' }}>
+          <div className="flex-col gap-1" style={{ width: '100%', alignItems: 'center' }}>
             {keyboardRows.map((row, rIdx) => (
               <div key={rIdx} className="flex gap-1" style={{ justifyContent: 'center', width: '100%' }}>
                 {row.map((char) => {
                   const status = getKeyStatus(char);
                   const style = getKeyStyle(status);
+                  const isSpace = char === ' ';
+                  const isBack = char === 'backspace';
+
                   return (
                     <div
                       key={char}
                       style={{
-                        width: '32px',
-                        height: '32px',
+                        width: isSpace ? '90px' : isBack ? '55px' : '23px',
+                        height: '24px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        borderRadius: '0.25rem',
+                        borderRadius: '0.2rem',
                         border: '1px solid',
-                        fontSize: '0.9rem',
-                        fontWeight: 600,
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
                         textTransform: 'uppercase',
+                        cursor: 'help',
                         ...style
                       }}
                       title={
                         keyStats[char.toLowerCase()] 
-                          ? `${char.toUpperCase()} key: ${keyStats[char.toLowerCase()].total} presses, ${Math.round(keyStats[char.toLowerCase()].accuracy)}% accuracy`
-                          : undefined
+                          ? `${char === ' ' ? 'Space' : char.toUpperCase()}: ${keyStats[char.toLowerCase()].total} hits, ${Math.round(keyStats[char.toLowerCase()].accuracy)}% accuracy`
+                          : `${char === ' ' ? 'Space' : char.toUpperCase()}: No presses logged yet`
                       }
                     >
-                      {char}
+                      {char === ' ' ? 'Space' : isBack ? 'Back' : char}
                     </div>
                   );
                 })}
               </div>
             ))}
           </div>
-
-          {/* Heatmap Legend */}
-          <div className="flex gap-4" style={{ marginTop: '1.5rem', justifyContent: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            <span className="flex" style={{ alignItems: 'center', gap: '0.25rem' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--success)' }}></span> Accurate (acc &ge; 95%, n &ge; 5)
-            </span>
-            <span className="flex" style={{ alignItems: 'center', gap: '0.25rem' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--warning)' }}></span> Warning (80% &le; acc &lt; 95%)
-            </span>
-            <span className="flex" style={{ alignItems: 'center', gap: '0.25rem' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--danger)' }}></span> High Error (acc &lt; 80%)
-            </span>
-          </div>
         </div>
       </div>
 
-      {/* Lesson Progress Summary Category Metrics */}
-      <div className="card flex-col">
-        <h3 className="card-title">Touch-Typing Curriculum Progress</h3>
-        <p className="card-desc">Your completion summary statistics per category path module.</p>
-        <div className="grid grid-cols-5" style={{ marginTop: '1.25rem', gap: '1rem' }}>
+      {/* Curriculum rings condensed progress rail */}
+      <div className="card flex-col" style={{ padding: '1rem' }}>
+        <h3 className="card-title" style={{ fontSize: '1rem', margin: 0 }}>Curriculum Module Milestones</h3>
+        <p className="card-desc" style={{ fontSize: '0.75rem', marginBottom: '0.5rem' }}>stage completion percentages</p>
+        <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
           {[
-            { code: 'home-row', label: 'Home Row' },
-            { code: 'extensions', label: 'Extensions' },
+            { code: 'foundation', label: 'Foundation' },
+            { code: 'vertical', label: 'Vertical' },
             { code: 'coordination', label: 'Coordination' },
-            { code: 'numbers-symbols', label: 'Numbers & Symbols' },
-            { code: 'advanced', label: 'Advanced' }
+            { code: 'numbers', label: 'Numbers' },
+            { code: 'symbols', label: 'Symbols' },
+            { code: 'integration', label: 'Integration' },
+            { code: 'specialist', label: 'Specialist' }
           ].map((phase) => {
             const phaseLessons = LESSONS_LIST.filter(l => l.phase === phase.code);
             const totalCount = phaseLessons.length;
@@ -362,45 +440,90 @@ export const ProgressView = () => {
 
             return (
               <div 
-                key={phase.code} 
-                className="card flex-col flex-center"
+                key={phase.code}
+                className="card"
                 style={{ 
-                  padding: '1.5rem 1.25rem', 
+                  flex: '1 0 110px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.35rem 0.5rem', 
                   backgroundColor: percentage === 100 ? 'rgba(16, 185, 129, 0.04)' : 'var(--bg-card)', 
-                  border: percentage === 100 ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--border)',
-                  gap: '0.75rem',
-                  textAlign: 'center',
-                  borderRadius: '0.5rem'
+                  borderColor: percentage === 100 ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)',
+                  borderRadius: '0.35rem'
                 }}
               >
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.025em' }}>
-                  {phase.label}
-                </span>
-
-                {/* Progress Wheel Gauge Ring */}
-                <div style={{ position: 'relative', width: '70px', height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="70" height="70" style={{ transform: 'rotate(-90deg)' }}>
-                    <circle cx="35" cy="35" r="28" fill="transparent" stroke="var(--border)" strokeWidth="5" />
+                <div style={{ position: 'relative', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg width="22" height="22" style={{ transform: 'rotate(-90deg)' }}>
+                    <circle cx="11" cy="11" r="9" fill="transparent" stroke="var(--border)" strokeWidth="2.5" />
                     <circle 
-                      cx="35" 
-                      cy="35" 
-                      r="28" 
+                      cx="11" 
+                      cy="11" 
+                      r="9" 
                       fill="transparent" 
                       stroke={percentage === 100 ? 'var(--success)' : 'var(--accent)'} 
-                      strokeWidth="5" 
-                      strokeDasharray={2 * Math.PI * 28} 
-                      strokeDashoffset={2 * Math.PI * 28 * (1 - percentage / 100)}
+                      strokeWidth="2.5" 
+                      strokeDasharray={2 * Math.PI * 9} 
+                      strokeDashoffset={2 * Math.PI * 9 * (1 - percentage / 100)}
                       strokeLinecap="round"
-                      style={{ transition: 'stroke-dashoffset 0.5s ease-out' }}
                     />
                   </svg>
-                  <span style={{ position: 'absolute', fontSize: '0.95rem', fontWeight: 700, color: percentage === 100 ? 'var(--success)' : 'var(--text)' }}>
-                    {percentage}%
+                </div>
+                <div className="flex-col">
+                  <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+                    {phase.label}
+                  </span>
+                  <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>
+                    {percentage}% ({completedCount}/{totalCount})
                   </span>
                 </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  {completedCount} of {totalCount} completed
+      {/* Badge collection section */}
+      <div className="card flex-col" style={{ padding: '1rem' }}>
+        <h3 className="card-title" style={{ fontSize: '1rem', margin: 0 }}>Your Badges Collection</h3>
+        <p className="card-desc" style={{ fontSize: '0.75rem', marginBottom: '0.5rem' }}>Achievements unlocked in learning modules</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '0.75rem', marginTop: '0.5rem' }}>
+          {[
+            { id: 'home-row-master', name: '🏠 Home Row Master', req: 'Complete Stage 25' },
+            { id: 'top-row-master', name: '⬆️ Top Row Master', req: 'Complete Stage 40' },
+            { id: 'full-alphabet', name: '🔤 Alphabet Complete', req: 'Complete Stage 55' },
+            { id: 'shift-shifter', name: '⬆️ Shift Shifter', req: 'Complete Stage 90' },
+            { id: 'number-cruncher', name: '🔢 Number Cruncher', req: 'Complete Stage 115' },
+            { id: 'symbol-master', name: '#️⃣ Symbol Master', req: 'Complete Stage 145' },
+            { id: 'sixty-wpm', name: '🚀 60 WPM Club', req: 'First test >= 60 WPM' },
+            { id: 'certified-typist', name: '📜 Certified Typist', req: 'Pass Stage 182' },
+            { id: 'keyboard-ninja', name: '🥷 Keyboard Ninja', req: 'Pass Stage 192' },
+            { id: 'typeflow-graduate', name: '🎓 TypeFlow Graduate', req: 'Complete Stage 200' },
+          ].map(badgeSpec => {
+            const isEarned = badges.some(b => b.id === badgeSpec.id);
+            return (
+              <div 
+                key={badgeSpec.id} 
+                style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  alignItems: 'center', 
+                  padding: '1rem', 
+                  background: isEarned ? 'var(--bg-card)' : 'rgba(30, 41, 59, 0.1)', 
+                  border: `1px solid ${isEarned ? 'var(--warning)' : 'var(--border)'}`, 
+                  borderRadius: '10px', 
+                  textAlign: 'center',
+                  opacity: isEarned ? 1 : 0.4
+                }}
+              >
+                <span style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>
+                  {badgeSpec.name.split(' ')[0]}
+                </span>
+                <strong style={{ fontSize: '0.8rem', display: 'block', color: 'var(--text)' }}>
+                  {badgeSpec.name.replace(/^[^\s]+\s+/, '')}
+                </strong>
+                <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                  {isEarned ? 'Unlocked' : badgeSpec.req}
                 </span>
               </div>
             );
@@ -408,75 +531,71 @@ export const ProgressView = () => {
         </div>
       </div>
 
-      {/* Recent Sessions Table */}
-      <div className="card">
-        <h3 className="card-title">Recent Sessions History</h3>
-        <p className="card-desc">Details of your 5 most recent typing test sessions.</p>
+      {/* Recent Sessions List */}
+      <div className="card" style={{ padding: '1rem' }}>
+        <h3 className="card-title" style={{ fontSize: '1rem', margin: 0 }}>Recent Typing Sessions</h3>
+        <p className="card-desc" style={{ fontSize: '0.75rem', marginBottom: '0.5rem' }}>performance details of your last 10 trials</p>
         
-        <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '500px' }}>
+        <div style={{ overflowX: 'auto', maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: '0.35rem' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.8rem' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                <th style={{ padding: '0.75rem 1rem' }}>Date</th>
-                <th style={{ padding: '0.75rem 1rem' }}>Duration</th>
-                <th style={{ padding: '0.75rem 1rem' }}>WPM</th>
-                <th style={{ padding: '0.75rem 1rem' }}>Accuracy</th>
-                <th style={{ padding: '0.75rem 1rem' }}>Errors</th>
+              <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', backgroundColor: 'var(--bg-hover)', position: 'sticky', top: 0 }}>
+                <th style={{ padding: '0.45rem 0.75rem' }}>Date</th>
+                <th style={{ padding: '0.45rem 0.75rem' }}>Duration</th>
+                <th style={{ padding: '0.45rem 0.75rem' }}>WPM</th>
+                <th style={{ padding: '0.45rem 0.75rem' }}>Accuracy</th>
+                <th style={{ padding: '0.45rem 0.75rem' }}>Consistency</th>
               </tr>
             </thead>
             <tbody>
               {sessions.length === 0 ? (
                 <tr>
-                  <td colSpan={5} style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                    No recent typing tests. Complete a test to see your history here!
+                  <td colSpan={5} style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    No recent typing tests completed.
                   </td>
                 </tr>
               ) : (
-                sessions.slice(0, 5).map((session, idx) => (
-                  <tr key={session.id || idx} style={{ borderBottom: idx < 4 ? '1px solid rgba(30, 41, 59, 0.4)' : 'none' }}>
-                    <td style={{ padding: '0.75rem 1rem', color: 'var(--text-dim)' }}>
-                      {new Date(session.timestamp).toLocaleDateString()} {new Date(session.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </td>
-                    <td style={{ padding: '0.75rem 1rem', color: 'var(--accent)' }}>{session.duration}s</td>
-                    <td style={{ padding: '0.75rem 1rem', fontWeight: 600 }}>{Math.round(session.wpm)}</td>
-                    <td style={{ padding: '0.75rem 1rem', color: 'var(--success)', fontWeight: 600 }}>
-                      {Math.round(session.accuracy * 10) / 10}%
-                    </td>
-                    <td style={{ padding: '0.75rem 1rem', color: session.errorsCount > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
-                      {session.errorsCount}
-                    </td>
-                  </tr>
-                ))
+                sessions.slice(0, 10).map((session, idx) => {
+                  let tierColor = 'var(--text)';
+                  if (session.wpm >= 60) tierColor = 'var(--success)';
+                  else if (session.wpm >= 40) tierColor = 'var(--accent)';
+                  else if (session.wpm >= 25) tierColor = 'var(--warning)';
+
+                  return (
+                    <tr key={session.id || idx} style={{ borderBottom: '1px solid rgba(30, 41, 59, 0.2)' }}>
+                      <td style={{ padding: '0.45rem 0.75rem', color: 'var(--text-dim)' }}>
+                        {new Date(session.timestamp).toLocaleDateString()}
+                      </td>
+                      <td style={{ padding: '0.45rem 0.75rem' }}>{session.duration}s</td>
+                      <td style={{ padding: '0.45rem 0.75rem', fontWeight: 700, color: tierColor }}>{Math.round(session.wpm)}</td>
+                      <td style={{ padding: '0.45rem 0.75rem', color: 'var(--success)' }}>{Math.round(session.accuracy)}%</td>
+                      <td style={{ padding: '0.45rem 0.75rem', color: 'var(--accent)' }}>{session.consistencyScore || 100}%</td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Data portability and privacy controls */}
-      <div className="card" style={{ borderColor: 'var(--border)' }}>
-        <h3 className="card-title">
-          <ShieldAlert size={20} className="logo-icon" style={{ color: 'var(--warning)' }} />
-          Local Data Control &amp; Privacy
-        </h3>
-        <p className="card-desc">
-          All typing session details are stored locally inside your browser's IndexedDB database. We never upload your keystrokes or analytics to remote servers. You have complete control over your data.
-        </p>
-        <div className="flex gap-4" style={{ marginTop: '1rem', flexWrap: 'wrap' }}>
-          <button className="btn btn-secondary" onClick={handleExport} title="Download database backup file">
-            <Download size={16} />
-            Export History (JSON)
+      {/* Collapsible accordion details elements */}
+      <details className="card" style={{ borderColor: 'var(--border)', cursor: 'pointer', padding: '0.5rem 1rem' }}>
+        <summary style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+          ⚙️ Data &amp; Privacy Management Controls
+        </summary>
+        <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button className="btn btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }} onClick={handleExport}>
+            Export Database (JSON)
           </button>
-          <button className="btn btn-secondary" onClick={handleImportClick} title="Import database backup file">
-            <Upload size={16} />
-            Import Backup (JSON)
+          <button className="btn btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }} onClick={handleImportClick}>
+            Import Backup File
           </button>
-          <button className="btn btn-danger" onClick={handleReset} title="Clear database and settings">
-            <Trash2 size={16} />
-            Reset &amp; Delete Database
+          <button className="btn btn-danger" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }} onClick={handleReset}>
+            Reset IndexedDB
           </button>
         </div>
-      </div>
+      </details>
     </div>
   );
 };

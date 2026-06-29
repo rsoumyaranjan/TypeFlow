@@ -126,11 +126,37 @@ export const Results: React.FC<ResultsProps> = ({ onNavigate, lastSessionData, o
     onStartPractice(recommendationWords);
   };
 
-  // Formatted stats for displays
-  const wpm = lastSessionData ? Math.round(lastSessionData.wpm) : 0;
-  const accuracy = lastSessionData ? Math.round(lastSessionData.accuracy) : 100;
-  const rawWpm = lastSessionData ? Math.round(lastSessionData.rawWpm) : 0;
-  const errors = lastSessionData ? lastSessionData.errorsCount : 0;
+  // Formatted stats for displays with rollup visual animations
+  const [animatedWpm, setAnimatedWpm] = React.useState<number>(0);
+  const [animatedAccuracy, setAnimatedAccuracy] = React.useState<number>(0);
+  const [animatedRawWpm, setAnimatedRawWpm] = React.useState<number>(0);
+  const [animatedErrors, setAnimatedErrors] = React.useState<number>(0);
+
+  const targetWpm = lastSessionData ? Math.round(lastSessionData.wpm) : 0;
+  const targetAccuracy = lastSessionData ? Math.round(lastSessionData.accuracy) : 100;
+  const targetRawWpm = lastSessionData ? Math.round(lastSessionData.rawWpm) : 0;
+  const targetErrors = lastSessionData ? lastSessionData.errorsCount : 0;
+
+  React.useEffect(() => {
+    let startTimestamp: number | null = null;
+    const duration = 1000; // 1s animation rollup
+
+    const step = (timestamp: number) => {
+      if (!startTimestamp) startTimestamp = timestamp;
+      const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+      
+      setAnimatedWpm(Math.floor(progress * targetWpm));
+      setAnimatedAccuracy(Math.floor(progress * targetAccuracy));
+      setAnimatedRawWpm(Math.floor(progress * targetRawWpm));
+      setAnimatedErrors(Math.floor(progress * targetErrors));
+
+      if (progress < 1) {
+        window.requestAnimationFrame(step);
+      }
+    };
+
+    window.requestAnimationFrame(step);
+  }, [targetWpm, targetAccuracy, targetRawWpm, targetErrors]);
 
   return (
     <div className="flex-col gap-6">
@@ -144,19 +170,19 @@ export const Results: React.FC<ResultsProps> = ({ onNavigate, lastSessionData, o
       <div className="grid grid-cols-2 lg-grid-cols-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem' }}>
         <div className="card" style={{ padding: '1.5rem', textAlign: 'center' }}>
           <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textTransform: 'uppercase', fontWeight: 600 }}>Net WPM</span>
-          <h3 style={{ fontSize: '3rem', fontWeight: 800, color: 'var(--accent)', marginTop: '0.25rem' }}>{wpm}</h3>
+          <h3 style={{ fontSize: '3rem', fontWeight: 800, color: 'var(--accent)', marginTop: '0.25rem' }}>{animatedWpm}</h3>
         </div>
         <div className="card" style={{ padding: '1.5rem', textAlign: 'center' }}>
           <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textTransform: 'uppercase', fontWeight: 600 }}>Accuracy</span>
-          <h3 style={{ fontSize: '3rem', fontWeight: 800, color: 'var(--success)', marginTop: '0.25rem' }}>{accuracy}%</h3>
+          <h3 style={{ fontSize: '3rem', fontWeight: 800, color: 'var(--success)', marginTop: '0.25rem' }}>{animatedAccuracy}%</h3>
         </div>
         <div className="card" style={{ padding: '1.5rem', textAlign: 'center' }}>
           <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textTransform: 'uppercase', fontWeight: 600 }}>Raw WPM</span>
-          <h3 style={{ fontSize: '3rem', fontWeight: 800, color: 'var(--text-dim)', marginTop: '0.25rem' }}>{rawWpm}</h3>
+          <h3 style={{ fontSize: '3rem', fontWeight: 800, color: 'var(--text-dim)', marginTop: '0.25rem' }}>{animatedRawWpm}</h3>
         </div>
         <div className="card" style={{ padding: '1.5rem', textAlign: 'center' }}>
           <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textTransform: 'uppercase', fontWeight: 600 }}>Errors</span>
-          <h3 style={{ fontSize: '3rem', fontWeight: 800, color: errors > 0 ? 'var(--danger)' : 'var(--text-muted)', marginTop: '0.25rem' }}>{errors}</h3>
+          <h3 style={{ fontSize: '3rem', fontWeight: 800, color: targetErrors > 0 ? 'var(--danger)' : 'var(--text-muted)', marginTop: '0.25rem' }}>{animatedErrors}</h3>
         </div>
       </div>
 

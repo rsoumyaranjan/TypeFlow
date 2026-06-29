@@ -8,8 +8,8 @@ describe('Analytics Utility Service', () => {
     it('returns all keys a-z initialized to zero for empty sessions', () => {
       const heatmap = computeKeyAccuracyHeatmap([]);
       
-      // Verify all a-z keys are present with zero values
-      expect(Object.keys(heatmap)).toHaveLength(26);
+      // Verify all extended keys are present with zero values
+      expect(Object.keys(heatmap)).toHaveLength(48);
       for (let i = 97; i <= 122; i++) {
         const char = String.fromCharCode(i);
         expect(heatmap[char]).toEqual({ total: 0, accuracy: 0 });

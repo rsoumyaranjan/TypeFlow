@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, Mail, Lock, ShieldCheck, AlertCircle, KeyRound, Sparkles } from 'lucide-react';
+import { db } from '../services/db';
 
 interface LoginProps {
   onAuthChange?: () => void;
@@ -9,9 +10,6 @@ interface LoginProps {
 interface UserRecord {
   username: string;
   email: string;
-  password?: string;
-  age: string;
-  gender: string;
 }
 
 export const Login: React.FC<LoginProps> = ({ onAuthChange }) => {
@@ -67,8 +65,8 @@ export const Login: React.FC<LoginProps> = ({ onAuthChange }) => {
     setErrorMsg('');
     setSuccessMsg('');
 
-    if (!signInIdentifier.trim() || !signInPassword.trim()) {
-      setErrorMsg('Please enter both username/email and password.');
+    if (!signInIdentifier.trim()) {
+      setErrorMsg('Please enter username or email.');
       return;
     }
 
@@ -76,20 +74,34 @@ export const Login: React.FC<LoginProps> = ({ onAuthChange }) => {
     const usersRaw = localStorage.getItem('typeflow_users_db');
     const users: UserRecord[] = usersRaw ? JSON.parse(usersRaw) : [];
 
-    // Search user
+    // Search user (no password requirements for mock local login profiles)
     const matchedUser = users.find(
       (u) => 
-        (u.username.toLowerCase() === signInIdentifier.trim().toLowerCase() ||
-         u.email.toLowerCase() === signInIdentifier.trim().toLowerCase()) &&
-        u.password === signInPassword
+        u.username.toLowerCase() === signInIdentifier.trim().toLowerCase() ||
+        u.email.toLowerCase() === signInIdentifier.trim().toLowerCase()
     );
 
     if (matchedUser) {
       // Login successful
       localStorage.setItem('typeflow_active_user', matchedUser.username);
       localStorage.setItem('typeflow_user_email', matchedUser.email);
-      localStorage.setItem('typeflow_user_age', matchedUser.age);
-      localStorage.setItem('typeflow_user_gender', matchedUser.gender);
+
+      // Save default age/gender into Dexie/IndexedDB database profile
+      db.userStats.get('current_user').then(stats => {
+        const newStats = stats ? { ...stats, age: stats.age || '25', gender: stats.gender || 'other' } : {
+          id: 'current_user',
+          xp: 0,
+          level: 1,
+          currentStreak: 0,
+          longestStreak: 0,
+          lastActiveTimestamp: 0,
+          unlockedThemes: ['theme-dark', 'theme-light', 'theme-sepia'],
+          activeTheme: 'theme-dark',
+          age: '25',
+          gender: 'other'
+        };
+        db.userStats.put(newStats);
+      });
 
       if (rememberMe) {
         localStorage.setItem('typeflow_remembered_user', signInIdentifier.trim());
@@ -107,7 +119,7 @@ export const Login: React.FC<LoginProps> = ({ onAuthChange }) => {
         navigate('/');
       }, 1000);
     } else {
-      setErrorMsg('Invalid username/email or password. Please try again.');
+      setErrorMsg('Invalid username/email. Please try again.');
     }
   };
 
@@ -123,14 +135,6 @@ export const Login: React.FC<LoginProps> = ({ onAuthChange }) => {
     }
     if (!signUpEmail.trim()) {
       setErrorMsg('Email is required.');
-      return;
-    }
-    if (!signUpPassword) {
-      setErrorMsg('Password is required.');
-      return;
-    }
-    if (signUpPassword !== signUpVerifyPassword) {
-      setErrorMsg('Passwords do not match.');
       return;
     }
     if (!signUpAge.trim() || isNaN(Number(signUpAge))) {
@@ -165,13 +169,10 @@ export const Login: React.FC<LoginProps> = ({ onAuthChange }) => {
       return;
     }
 
-    // Save user
+    // Save user without password, age, or gender in localStorage
     const newUser: UserRecord = {
       username: signUpUsername.trim(),
       email: signUpEmail.trim(),
-      password: signUpPassword,
-      age: signUpAge.trim(),
-      gender: signUpGender,
     };
 
     users.push(newUser);
@@ -180,8 +181,23 @@ export const Login: React.FC<LoginProps> = ({ onAuthChange }) => {
     // Sign them in directly
     localStorage.setItem('typeflow_active_user', newUser.username);
     localStorage.setItem('typeflow_user_email', newUser.email);
-    localStorage.setItem('typeflow_user_age', newUser.age);
-    localStorage.setItem('typeflow_user_gender', newUser.gender);
+
+    // Save age and gender only in Dexie/IndexedDB database profile
+    db.userStats.get('current_user').then(stats => {
+      const newStats = stats ? { ...stats, age: signUpAge.trim(), gender: signUpGender } : {
+        id: 'current_user',
+        xp: 0,
+        level: 1,
+        currentStreak: 0,
+        longestStreak: 0,
+        lastActiveTimestamp: 0,
+        unlockedThemes: ['theme-dark', 'theme-light', 'theme-sepia'],
+        activeTheme: 'theme-dark',
+        age: signUpAge.trim(),
+        gender: signUpGender
+      };
+      db.userStats.put(newStats);
+    });
 
     setSuccessMsg('Account created successfully!');
     if (onAuthChange) onAuthChange();
@@ -213,8 +229,6 @@ export const Login: React.FC<LoginProps> = ({ onAuthChange }) => {
         users.push({
           username: mockUsername,
           email: mockEmail,
-          age: '25',
-          gender: 'other'
         });
         localStorage.setItem('typeflow_users_db', JSON.stringify(users));
       }
@@ -222,8 +236,23 @@ export const Login: React.FC<LoginProps> = ({ onAuthChange }) => {
       // Log in
       localStorage.setItem('typeflow_active_user', mockUsername);
       localStorage.setItem('typeflow_user_email', mockEmail);
-      localStorage.setItem('typeflow_user_age', '25');
-      localStorage.setItem('typeflow_user_gender', 'other');
+
+      // Save age and gender only in Dexie/IndexedDB database profile
+      db.userStats.get('current_user').then(stats => {
+        const newStats = stats ? { ...stats, age: '25', gender: 'other' } : {
+          id: 'current_user',
+          xp: 0,
+          level: 1,
+          currentStreak: 0,
+          longestStreak: 0,
+          lastActiveTimestamp: 0,
+          unlockedThemes: ['theme-dark', 'theme-light', 'theme-sepia'],
+          activeTheme: 'theme-dark',
+          age: '25',
+          gender: 'other'
+        };
+        db.userStats.put(newStats);
+      });
 
       setSuccessMsg(`Logged in via ${platform}!`);
       if (onAuthChange) onAuthChange();

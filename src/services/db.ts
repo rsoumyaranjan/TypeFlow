@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import type { KeystrokeEvent } from '../utils/typingEngine';
+import type { LessonTrack } from '../utils/lessonsData';
 
 export interface TypingTestSession {
   id?: number;
@@ -12,6 +13,8 @@ export interface TypingTestSession {
   wordsCount: number;
   keystrokeLog: KeystrokeEvent[];
   missedWords: string[];
+  wpmTimeline?: number[];
+  consistencyScore?: number;
 }
 
 export interface PersonalBest {
@@ -27,6 +30,35 @@ export interface LessonAttempt {
   completedAt: Date;
   errorsCount: number;
   durationSeconds: number;
+  wpm?: number;
+  accuracy?: number;
+  consistency?: number;
+  passed?: boolean;
+  xpEarned?: number;
+}
+
+export interface Badge {
+  id: string;                 // e.g., 'home-row-master'
+  name: string;               // e.g., '🏠 Home Row Master'
+  unlockedAt: number;         // timestamp
+}
+
+export interface DailyChallengeResult {
+  id?: number;
+  challengeDate: string;      // "2026-06-28"
+  type: 'speed' | 'accuracy' | 'endurance' | 'symbol' | 'words';
+  wpm: number;
+  accuracy: number;
+  passed: boolean;
+  xpEarned: number;
+  timestamp: number;
+}
+
+export interface KeystrokeHistory {
+  id?: number;
+  lessonId: number;
+  keystrokeLog: KeystrokeEvent[];
+  timestamp: number;
 }
 
 export interface UserStats {
@@ -38,6 +70,12 @@ export interface UserStats {
   lastActiveTimestamp: number;
   unlockedThemes: string[];
   activeTheme: string;
+  selectedTrack?: LessonTrack;                // default: 'adult'
+  streakShieldAvailable?: boolean;            // earned at 7-day streak
+  streakShieldUsedDate?: number | null;
+  dailyChallengeLastCompleted?: string | null; // ISO date string
+  age?: string;
+  gender?: string;
 }
 
 export class TypeFlowDB extends Dexie {
@@ -45,6 +83,9 @@ export class TypeFlowDB extends Dexie {
   personalBests!: Table<PersonalBest, number>;
   lessons!: Table<LessonAttempt, number>;
   userStats!: Table<UserStats, string>;
+  badges!: Table<Badge, string>;
+  dailyChallenges!: Table<DailyChallengeResult, number>;
+  keystrokeHistory!: Table<KeystrokeHistory, number>;
 
   constructor() {
     super('TypeFlowDB');
@@ -68,6 +109,32 @@ export class TypeFlowDB extends Dexie {
       personalBests: 'duration, wpm, timestamp',
       lessons: '++id, lessonId, completedAt',
       userStats: 'id'
+    });
+
+    // Version 4 (Expert suggestions data schemas: snapshots timeline, consistency index)
+    this.version(4).stores({
+      tests: '++id, timestamp, duration, wpm, accuracy, consistencyScore',
+      personalBests: 'duration, wpm, timestamp',
+      lessons: '++id, lessonId, completedAt',
+      userStats: 'id'
+    });
+
+    // Version 5 (Badge collection, daily challenges, keystroke history)
+    this.version(5).stores({
+      tests: '++id, timestamp, duration, wpm, accuracy, consistencyScore',
+      personalBests: 'duration, wpm, timestamp',
+      lessons: '++id, lessonId, completedAt',
+      userStats: 'id',
+      badges: 'id, unlockedAt',
+      dailyChallenges: '++id, challengeDate, timestamp',
+      keystrokeHistory: '++id, lessonId, timestamp'
+    }).upgrade(tx => {
+      return tx.table('userStats').toCollection().modify(stats => {
+        stats.selectedTrack = stats.selectedTrack || 'adult';
+        stats.streakShieldAvailable = false;
+        stats.streakShieldUsedDate = null;
+        stats.dailyChallengeLastCompleted = null;
+      });
     });
   }
 }
@@ -392,7 +459,7 @@ export async function addXP(amount: number): Promise<{ levelUp: boolean; newLeve
 /**
  * Handles daily active streaks checks on completions.
  */
-export async function updateDailyStreak(): Promise<{ currentStreak: number; streakUpdated: boolean }> {
+export async function updateDailyStreak(): Promise<{ currentStreak: number; streakUpdated: boolean; shieldUsed: boolean }> {
   return db.transaction('rw', db.userStats, async () => {
     let stats = await db.userStats.get('current_user');
     const now = new Date();
@@ -410,10 +477,14 @@ export async function updateDailyStreak(): Promise<{ currentStreak: number; stre
         longestStreak: 1,
         lastActiveTimestamp: today,
         unlockedThemes: ['theme-dark', 'theme-light', 'theme-sepia'],
-        activeTheme: 'theme-dark'
+        activeTheme: 'theme-dark',
+        selectedTrack: 'adult',
+        streakShieldAvailable: false,
+        streakShieldUsedDate: null,
+        dailyChallengeLastCompleted: null
       };
       await db.userStats.put(stats);
-      return { currentStreak: 1, streakUpdated: true };
+      return { currentStreak: 1, streakUpdated: true, shieldUsed: false };
     }
 
     const lastActiveDate = new Date(stats.lastActiveTimestamp);
@@ -422,15 +493,30 @@ export async function updateDailyStreak(): Promise<{ currentStreak: number; stre
     const diffMs = today - lastActiveMidnight;
     let newStreak = stats.currentStreak;
     let updated = false;
+    let shieldUsed = false;
 
     if (diffMs === oneDayMs) {
       // Consecutive day active
       newStreak += 1;
       updated = true;
     } else if (diffMs > oneDayMs) {
-      // Streak broken, reset to 1
-      newStreak = 1;
-      updated = true;
+      // Streak broken
+      if (stats.streakShieldAvailable) {
+        // Streak Shield protects!
+        stats.streakShieldAvailable = false;
+        stats.streakShieldUsedDate = today;
+        newStreak += 1; // Preserve and increment streak
+        shieldUsed = true;
+        updated = true;
+      } else {
+        newStreak = 1;
+        updated = true;
+      }
+    }
+
+    // Earn streak shield at a 7-day streak
+    if (newStreak >= 7 && !stats.streakShieldAvailable) {
+      stats.streakShieldAvailable = true;
     }
 
     if (updated || stats.lastActiveTimestamp !== today) {
@@ -440,7 +526,75 @@ export async function updateDailyStreak(): Promise<{ currentStreak: number; stre
       await db.userStats.put(stats);
     }
 
-    return { currentStreak: stats.currentStreak, streakUpdated: updated };
+    return { currentStreak: stats.currentStreak, streakUpdated: updated, shieldUsed };
   });
 }
+
+// --- BADGE CRUD ---
+export async function saveBadge(badgeId: string, name: string): Promise<void> {
+  await db.badges.put({
+    id: badgeId,
+    name,
+    unlockedAt: Date.now()
+  });
+
+  // Automatically unlock a corresponding theme if applicable
+  await db.transaction('rw', db.userStats, async () => {
+    const stats = await db.userStats.get('current_user');
+    if (stats) {
+      let themeToUnlock = '';
+      if (badgeId === 'home-row-master') themeToUnlock = 'theme-sepia';
+      else if (badgeId === 'full-alphabet') themeToUnlock = 'theme-forest';
+      else if (badgeId === 'shift-shifter') themeToUnlock = 'theme-neon';
+      else if (badgeId === 'number-cruncher') themeToUnlock = 'theme-retro';
+      else if (badgeId === 'symbol-master') themeToUnlock = 'theme-cyberpunk';
+      else if (badgeId === 'sixty-wpm') themeToUnlock = 'theme-gold';
+      else if (badgeId === 'keyboard-ninja') themeToUnlock = 'theme-hacker';
+
+      if (themeToUnlock && !stats.unlockedThemes.includes(themeToUnlock)) {
+        stats.unlockedThemes.push(themeToUnlock);
+        await db.userStats.put(stats);
+      }
+    }
+  });
+}
+
+export async function getBadges(): Promise<Badge[]> {
+  return db.badges.toArray();
+}
+
+export async function hasBadge(badgeId: string): Promise<boolean> {
+  const badge = await db.badges.get(badgeId);
+  return !!badge;
+}
+
+// --- KEYSTROKE HISTORY (For adaptive analysis) ---
+export async function saveKeystrokeHistory(lessonId: number, log: KeystrokeEvent[]): Promise<void> {
+  await db.keystrokeHistory.add({
+    lessonId,
+    keystrokeLog: log,
+    timestamp: Date.now()
+  });
+}
+
+export async function getRecentKeystrokeHistory(sessionCount: number): Promise<KeystrokeHistory[]> {
+  return db.keystrokeHistory.orderBy('timestamp').reverse().limit(sessionCount).toArray();
+}
+
+// --- DAILY CHALLENGES ---
+export async function saveDailyChallengeCompletion(result: DailyChallengeResult): Promise<void> {
+  await db.dailyChallenges.add(result);
+  await db.transaction('rw', db.userStats, async () => {
+    const stats = await db.userStats.get('current_user');
+    if (stats) {
+      stats.dailyChallengeLastCompleted = result.challengeDate;
+      await db.userStats.put(stats);
+    }
+  });
+}
+
+export async function getDailyChallengeCompletion(date: string): Promise<DailyChallengeResult | undefined> {
+  return db.dailyChallenges.where('challengeDate').equals(date).first();
+}
+
 

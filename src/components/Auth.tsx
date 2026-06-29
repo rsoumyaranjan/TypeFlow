@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User } from 'lucide-react';
+import { db } from '../services/db';
 
 interface AuthProps {
   onAuthChange?: () => void;
@@ -21,9 +22,19 @@ export const Auth: React.FC<AuthProps> = ({ onAuthChange }) => {
     const savedUser = localStorage.getItem('typeflow_active_user');
     if (savedUser) {
       setUser(savedUser);
-      setUserGender(localStorage.getItem('typeflow_user_gender') || 'other');
-      setUserAge(localStorage.getItem('typeflow_user_age') || '');
       setUserEmail(localStorage.getItem('typeflow_user_email') || '');
+      db.userStats.get('current_user').then(stats => {
+        if (stats) {
+          setUserGender(stats.gender || 'other');
+          setUserAge(stats.age || '');
+        } else {
+          setUserGender('other');
+          setUserAge('');
+        }
+      }).catch(() => {
+        setUserGender('other');
+        setUserAge('');
+      });
     } else {
       setUser(null);
     }
@@ -52,8 +63,6 @@ export const Auth: React.FC<AuthProps> = ({ onAuthChange }) => {
   const handleLogout = () => {
     localStorage.removeItem('typeflow_active_user');
     localStorage.removeItem('typeflow_user_email');
-    localStorage.removeItem('typeflow_user_age');
-    localStorage.removeItem('typeflow_user_gender');
     setUser(null);
     setShowDropdown(false);
     

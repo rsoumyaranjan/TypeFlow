@@ -119,8 +119,12 @@ vi.mock('dexie', () => {
       tests = mockTestsTable;
       personalBests = mockPersonalBestsTable;
       lessons = mockLessonsTable;
-      version = vi.fn().mockReturnValue({
-        stores: vi.fn()
+      version = vi.fn().mockImplementation(() => {
+        const v = {
+          stores: vi.fn(() => v),
+          upgrade: vi.fn(() => v)
+        };
+        return v;
       });
       transaction = vi.fn(async (...args: any[]) => {
         const cb = args[args.length - 1];
